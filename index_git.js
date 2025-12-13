@@ -8,6 +8,9 @@ import Groq from "groq-sdk";
 // --- ВЕРНАЯ версия pdfjs-dist: 3.11.174 ---
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
+// Подключаем библиотеку для работы с Word (docx)
+import mammoth from "mammoth";
+
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_TOKEN = process.env.TOKEN_TG;  // В Vercel используем переменную окружения TOKEN_TG
@@ -216,8 +219,13 @@ bot.on("text", async (ctx) => {
 });
 
 // --------------------------------------------------
-// START BOT (для Vercel)
+// ВЕБХУК И НАЧАЛО РАБОТЫ БОТА
 // --------------------------------------------------
+
+// Устанавливаем вебхук (URL Vercel автоматически предоставляется)
+const webhookUrl = `https://${process.env.VERCEL_URL}/webhook`;
+bot.telegram.setWebhook(webhookUrl);
+
 export default function handler(req, res) {
   bot.handleUpdate(req.body, res);
 }

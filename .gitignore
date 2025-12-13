@@ -1,0 +1,14 @@
+# Node.js dependencies
+node_modules/
+
+# dotenv environment variables file
+.env
+
+# Logs
+*.log
+
+# OS-specific files
+Thumbs.db           # Для Windows
+
+# VS Code settings
+.vscode/

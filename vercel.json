@@ -6,10 +6,6 @@
       "use": "@vercel/node"
     }
   ],
-  "env": {
-    "GROQ_API_KEY": "@groq_api_key",
-    "TOKEN_TG": "@telegram_token"
-  },
   "routes": [
   {
     "src": "/webhook",

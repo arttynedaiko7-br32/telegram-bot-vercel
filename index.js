@@ -222,29 +222,30 @@ bot.on('text', async (ctx) => {
 // --------------------------------------------------
 
 export default async function handler(req, res) {
-  if (req.method === 'GET') {
-    return res.status(200).send('Webhook работает!');
-  }
-
-  if (req.method === 'POST') {
-    try {
+  try {
+    if (req.method === 'POST') {
       const update = req.body;
+
       if (!update) {
         console.error('Ошибка: Пустое тело запроса');
         return res.status(400).send('Invalid request body');
       }
 
+      // Логирование полученного обновления для отладки
       console.log('Received update:', update);
-      await bot.handleUpdate(update);
-      return res.status(200).send('OK');
-    } catch (err) {
-      console.error('Ошибка при обработке вебхука:', err);
-      return res.status(500).send('Internal Server Error');
-    }
-  }
 
-  // Возвращаем 405 для всех других методов
-  return res.status(405).send('Method Not Allowed');
+      // Обработка обновления с помощью Telegraf
+      await bot.handleUpdate(update);
+
+      return res.status(200).send('OK');
+    } else {
+      // Ответ на все GET-запросы
+      return res.status(405).send('Method Not Allowed');
+    }
+  } catch (err) {
+    console.error('Ошибка при обработке вебхука:', err);
+    return res.status(500).send('Internal Server Error');
+  }
 }
 
 

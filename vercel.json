@@ -7,8 +7,7 @@
     }
   ],
   "env": {
-    "TOKEN_TG": "8302115712:AAHycawj5DyTynsMcmzvGXcqHNzPiiddozs",  
-    "VERCEL_URL": "@vercel-url"             
+    "TOKEN_TG": "8302115712:AAHycawj5DyTynsMcmzvGXcqHNzPiiddozs"             
   },
   "routes": [
     {

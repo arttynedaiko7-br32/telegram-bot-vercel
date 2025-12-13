@@ -1,33 +1,33 @@
+import "dotenv/config";
 import { Telegraf } from "telegraf";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import Groq from "groq-sdk";
 
 // --- ВЕРНАЯ версия pdfjs-dist: 3.11.174 ---
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
-// Подключаем библиотеку для работы с Word (docx)
-import mammoth from "mammoth";
+// Подключаем библиотеку Groq
+import Groq from "groq-sdk";
 
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const TELEGRAM_TOKEN = process.env.TOKEN_TG;  // В Vercel используем переменную окружения TOKEN_TG
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 
 if (!GROQ_API_KEY) {
   console.error("Ошибка: переменная окружения GROQ_API_KEY не задана.");
   process.exit(1);
 }
 if (!TELEGRAM_TOKEN) {
-  console.error("Ошибка: переменная окружения TOKEN_TG не задана.");
+  console.error("Ошибка: переменная окружения TELEGRAM_TOKEN не задана.");
   process.exit(1);
 }
 
 // Инициализация Groq с вашим API ключом
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-// Инициализация бота
+// ---------- INIT ----------
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
 // ---------- MEMORY ----------
@@ -115,7 +115,7 @@ bot.on("document", async (ctx) => {
       timeout: 120000,
     });
 
-    const uint8 = new Uint8Array(resp.data);
+    const uint8 = new Uint8Array(resp.data); // ← КЛЮЧЕВОЙ МОМЕНТ
 
     // Сохраняем временно (не обязательно, но пусть будет)
     fs.writeFileSync(filePath, Buffer.from(uint8));
@@ -219,13 +219,12 @@ bot.on("text", async (ctx) => {
 });
 
 // --------------------------------------------------
-// ВЕБХУК И НАЧАЛО РАБОТЫ БОТА
+// START BOT
 // --------------------------------------------------
+bot.launch().then(() => {
+  console.log("🤖 Telegram бот запущен (polling).");
+});
 
-// Устанавливаем вебхук (URL Vercel автоматически предоставляется)
-const webhookUrl = `https://${process.env.VERCEL_URL}/webhook`;
-bot.telegram.setWebhook(webhookUrl);
+process.once("SIGINT", () => bot.stop("SIGINT"));
+process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
-export default function handler(req, res) {
-  bot.handleUpdate(req.body, res);
-}

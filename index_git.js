@@ -3,12 +3,10 @@ import axios from "axios";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import Groq from "groq-sdk";
 
 // --- ВЕРНАЯ версия pdfjs-dist: 3.11.174 ---
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-
-// Подключаем библиотеку Groq
-import Groq from "groq-sdk";
 
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -26,7 +24,7 @@ if (!TELEGRAM_TOKEN) {
 // Инициализация Groq с вашим API ключом
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-// ---------- INIT ----------
+// Инициализация бота
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
 // ---------- MEMORY ----------
@@ -114,7 +112,7 @@ bot.on("document", async (ctx) => {
       timeout: 120000,
     });
 
-    const uint8 = new Uint8Array(resp.data); // ← КЛЮЧЕВОЙ МОМЕНТ
+    const uint8 = new Uint8Array(resp.data);
 
     // Сохраняем временно (не обязательно, но пусть будет)
     fs.writeFileSync(filePath, Buffer.from(uint8));
@@ -219,6 +217,7 @@ bot.on("text", async (ctx) => {
 
 // --------------------------------------------------
 // START BOT (для Vercel)
+// --------------------------------------------------
 export default function handler(req, res) {
   bot.handleUpdate(req.body, res);
 }

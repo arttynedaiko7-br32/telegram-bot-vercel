@@ -11,9 +11,9 @@
     "TOKEN_TG": "@telegram_token"
   },
   "routes": [
-    {
-      "src": "/webhook",
-      "dest": "/index.js"
-    }
-  ]
+  {
+    "src": "/webhook",
+    "dest": "/index_git.js"
+  }
+]
 }

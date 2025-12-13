@@ -1,20 +1,16 @@
 {
-  "name": "my-telegram-bot",
+  "name": "telegram-bot-vercel",
   "version": "1.0.0",
-  "description": "Telegram bot on Vercel",
+  "description": "My telegram bot",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "build": "npm run build"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "axios": "^0.21.1"
   },
   "engines": {
-    "node": "14.x"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "dotenv": "^17.2.3",
-    "node-telegram-bot-api": "^0.67.0"
+    "node": "24.x"
   }
 }

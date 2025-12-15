@@ -27,7 +27,7 @@ const SYSTEM_PROMPT = `
 Если пользователь загрузил документ:
 - используй его как основной источник
 - не выдумывай факты
-- если информации нет — прямо скажи об этом
+- если информации в документе нет — прямо скажи об этом
 
 Отвечай чётко и по делу.
 `;
@@ -111,13 +111,13 @@ bot.on('document', async ctx => {
       return ctx.reply('Не удалось извлечь текст из файла.');
     }
 
-    // ограничиваем размер документа
     if (text.length > MAX_DOC_LENGTH) {
       text = text.slice(0, MAX_DOC_LENGTH) + '\n\n[Документ обрезан]';
     }
 
     chat.documentName = name;
     chat.documentText = text;
+    chat.history = [];
 
     ctx.reply(`Готово ✅\nФайл: ${name}`);
   } catch (e) {
@@ -151,7 +151,7 @@ ${chat.documentText}
   }
 
   messages.push(
-    ...chat.history.slice(-6),
+    ...chat.history,
     { role: 'user', content: question }
   );
 

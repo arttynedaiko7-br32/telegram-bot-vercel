@@ -1,6 +1,6 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import pdf from 'pdf-parse/lib/pdf-parse.js'; // ❗️ фикс для serverless
+import pdf from 'pdf-parse/lib/pdf-parse.js';
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
@@ -45,25 +45,23 @@ function getChat(chatId) {
 
 /* ================= ITERATIVE SEARCH ================= */
 function getIterativeDocContext(chat) {
-  const { chunks, searchStep } = chat;
+  const chunks = chat.chunks;
   const n = chunks.length;
   const STEP = 2;
 
   if (!n) return null;
 
-  // Шаг 0 — начало + середина + конец
-  if (searchStep === 0) {
+  // шаг 0 — начало + середина + конец
+  if (chat.searchStep === 0) {
     chat.searchStep++;
     return [
       chunks[0],
       chunks[Math.floor(n / 2)],
       chunks[n - 1]
-    ]
-      .filter(Boolean)
-      .join('\n');
+    ].filter(Boolean).join('\n');
   }
 
-  const step = searchStep - 1;
+  const step = chat.searchStep - 1;
   const left = step * STEP;
   const right = n - STEP - step * STEP;
 
@@ -74,9 +72,7 @@ function getIterativeDocContext(chat) {
   return [
     ...chunks.slice(left, left + STEP),
     ...chunks.slice(right, right + STEP)
-  ]
-    .filter(Boolean)
-    .join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 /* ================= UTILS ================= */
@@ -89,9 +85,18 @@ function chunkText(text) {
 }
 
 function findRelevant(chunks, query) {
-  const q = query.toLowerCase();
+  const words = query
+    .toLowerCase()
+    .split(/[\s\-_,.]+/)
+    .filter(w => w.length > 3);
+
+  if (!words.length) return '';
+
   return chunks
-    .filter(c => c.toLowerCase().includes(q))
+    .filter(chunk => {
+      const c = chunk.toLowerCase();
+      return words.some(w => c.includes(w));
+    })
     .slice(0, 3)
     .join('\n');
 }
@@ -101,10 +106,7 @@ async function downloadTelegramFile(ctx, fileId) {
   const file = await ctx.telegram.getFile(fileId);
   const url = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`;
 
-  const resp = await axios.get(url, {
-    responseType: 'arraybuffer'
-  });
-
+  const resp = await axios.get(url, { responseType: 'arraybuffer' });
   if (resp.status !== 200) {
     throw new Error('File download failed');
   }
@@ -116,7 +118,7 @@ async function downloadTelegramFile(ctx, fileId) {
 async function extractPdfText(buffer) {
   try {
     const data = await pdf(buffer, {
-      pagerender: null // ❗️ критично для Vercel
+      pagerender: null
     });
 
     if (!data.text || !data.text.trim()) {
@@ -124,8 +126,8 @@ async function extractPdfText(buffer) {
     }
 
     return data.text.trim();
-  } catch (error) {
-    console.error('PDF parse error:', error);
+  } catch (e) {
+    console.error('PDF parse error:', e);
     throw new Error('Не удалось обработать PDF');
   }
 }
@@ -202,6 +204,9 @@ bot.on('text', async ctx => {
   const question = ctx.message.text.trim();
   if (!question) return;
 
+  // ❗️КРИТИЧНО: сброс поиска на каждый вопрос
+  chat.searchStep = 0;
+
   chat.history.push({ role: 'user', content: question });
   if (chat.history.length > MAX_HISTORY) {
     chat.history.splice(0, chat.history.length - MAX_HISTORY);
@@ -216,12 +221,11 @@ bot.on('text', async ctx => {
 
     if (!docContext) {
       docContext = getIterativeDocContext(chat);
+    }
 
-      if (!docContext) {
-        return ctx.reply(
-          '⚠️ В загруженном документе не найдено информации по этому вопросу.'
-        );
-      }
+    // fallback — даём общий контекст, а не отказываемся
+    if (!docContext) {
+      docContext = chat.chunks.slice(0, 3).join('\n');
     }
 
     messages.push({

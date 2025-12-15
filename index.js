@@ -224,14 +224,44 @@ bot.command('ask', async ctx => {
   ctx.reply(answer);
 });
 
+
 // ================= WEBHOOK =================
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  // Telegram иногда делает GET-запросы
+  if (req.method !== 'POST') {
+    return res.status(200).send('OK');
+  }
+
   try {
-    await bot.handleUpdate(req.body);
-    res.status(200).send('OK');
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Error');
+    // Vercel может передать body как строку или объект
+    let update = req.body;
+
+    if (!update) {
+      console.error('[WEBHOOK] Empty body');
+      return res.status(200).send('OK');
+    }
+
+    if (typeof update === 'string') {
+      try {
+        update = JSON.parse(update);
+      } catch (e) {
+        console.error('[WEBHOOK] JSON parse error', e);
+        return res.status(200).send('OK');
+      }
+    }
+
+    // Защита от мусора
+    if (!update.update_id) {
+      console.error('[WEBHOOK] Invalid update', update);
+      return res.status(200).send('OK');
+    }
+
+    await bot.handleUpdate(update);
+
+    return res.status(200).send('OK');
+  } catch (error) {
+    // ❗ НИКОГДА не отдаём 500 Telegram
+    console.error('[WEBHOOK] Handler crash', error);
+    return res.status(200).send('OK');
   }
 }

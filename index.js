@@ -1,14 +1,10 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
+import pdf from 'pdf-parse'; // ✅ НОВАЯ PDF библиотека
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
 import JSZip from 'jszip';
-
-/* ================= PDF WORKER FIX ================= */
-// 🔴 ОБЯЗАТЕЛЬНО для Vercel / Node.js
-pdfjs.GlobalWorkerOptions.workerSrc = null;
 
 /* ================= ENV ================= */
 const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
@@ -79,27 +75,16 @@ async function downloadTelegramFile(ctx, fileId) {
 /* ================= PDF ================= */
 async function extractPdfText(buffer) {
   try {
-    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
-    
-    const maxPages = 10;  // Ограничение на количество страниц
-    const pageCount = Math.min(pdf.numPages, maxPages);
-    
-    let text = '';
-    for (let i = 1; i <= pageCount; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim() + '\n';
+    const data = await pdf(buffer);
+
+    if (!data.text || !data.text.trim()) {
+      return '[PDF не содержит извлекаемый текст (возможно, это скан)]';
     }
 
-    if (pdf.numPages > maxPages) {
-      text += `\n...и другие ${pdf.numPages - maxPages} страницы.`;
-    }
-
-    return text;
-
+    return data.text.trim();
   } catch (error) {
-    console.error('Ошибка извлечения текста из PDF:', error);
-    throw new Error('Не удалось извлечь текст из PDF.');
+    console.error('PDF parse error:', error);
+    throw new Error('Не удалось обработать PDF');
   }
 }
 

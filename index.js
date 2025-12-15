@@ -6,60 +6,43 @@ import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
 import JSZip from 'jszip';
 
-// ================= PDFJS FIX (Node / Vercel) =================
-pdfjs.GlobalWorkerOptions.workerSrc = null;
-
-// ================= ENV =================
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-
+/* ================= ENV ================= */
+const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
 if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
-  throw new Error('Missing ENV variables GROQ_API_KEY or TELEGRAM_TOKEN');
+  throw new Error('Missing ENV variables');
 }
 
-// ================= DEBUG =================
-const DEBUG = true;
-function debug(...args) {
-  if (DEBUG) console.log('[DEBUG]', ...args);
-}
-
-// ================= INIT =================
-const groq = new Groq({ apiKey: GROQ_API_KEY });
+/* ================= INIT ================= */
 const bot = new Telegraf(TELEGRAM_TOKEN);
+const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-// ================= CONFIG =================
-const CHUNK_SIZE = 8000;
-const SUMMARY_TOKENS = 300;
-const MAX_HISTORY = 20;
+/* ================= CONFIG ================= */
+const CHUNK_SIZE = 6000;
+const MAX_HISTORY = 50;
 
-const SYSTEM_PROMPT = `Ты — инженерный AI-ассистент.
+const SYSTEM_PROMPT = `
+Ты инженерный AI-ассистент.
+Помогаешь с кодом и техническими задачами.
+Если есть документ — используй его как контекст.
+Отвечай чётко и по делу.
+`;
 
-Помогаешь решать инженерные и технические задачи,
-писать и отлаживать код,
-объяснять архитектуру, алгоритмы и ошибки.
-
-Учитывай контекст диалога.
-Файлы используй только как дополнительный контекст.
-Отвечай чётко и по делу.`;
-
-// ================= MEMORY =================
+/* ================= MEMORY ================= */
 const chats = new Map();
 
 function getChat(chatId) {
   if (!chats.has(chatId)) {
-    debug('Init chat memory', chatId);
     chats.set(chatId, { history: [], chunks: [] });
   }
   return chats.get(chatId);
 }
 
-// ================= UTILS =================
-function chunkText(text, size = CHUNK_SIZE) {
+/* ================= UTILS ================= */
+function chunkText(text) {
   const chunks = [];
-  for (let i = 0; i < text.length; i += size) {
-    chunks.push(text.slice(i, i + size));
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE));
   }
-  debug('chunkText', { chunks: chunks.length });
   return chunks;
 }
 
@@ -70,171 +53,123 @@ function findRelevant(chunks, query) {
     .join('\n');
 }
 
-// ================= PDF =================
-async function extractPdfChunks(uint8, pagesPerChunk = 5) {
-  const pdf = await pdfjs.getDocument({ data: uint8, disableWorker: true }).promise;
-  const chunks = [];
-  let buffer = '';
-  let counter = 0;
+/* ================= PDF ================= */
+async function extractPdfChunks(uint8) {
+  const pdf = await pdfjs.getDocument({ data: uint8 }).promise;
+  let text = '';
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    buffer += content.items.map(it => it.str).join(' ') + '\n';
-    counter++;
-
-    if (counter === pagesPerChunk) {
-      chunks.push(buffer);
-      buffer = '';
-      counter = 0;
-    }
+    text += content.items.map(it => it.str).join(' ') + '\n';
   }
 
-  if (buffer.trim()) chunks.push(buffer);
-  debug('PDF chunks', chunks.length);
-  return chunks;
+  return chunkText(text);
 }
 
-// ================= COMMANDS =================
+/* ================= COMMANDS ================= */
 bot.start(ctx => {
-  ctx.reply('Инженерный AI-ассистент для помощи с кодом и инженерными задачами.');
-});
-
-bot.command('help', ctx => {
-  ctx.reply(`/start — информация о боте
-/help — список команд
-/reset — очистить память
-/clear — очистить историю
-/ask <вопрос> — вопрос по загруженному контексту`);
+  ctx.reply('Инженерный AI-ассистент. Задай вопрос или загрузи файл.');
 });
 
 bot.command('reset', ctx => {
   chats.delete(ctx.chat.id);
-  ctx.reply('Память и контекст очищены.');
+  ctx.reply('Контекст и память очищены.');
 });
 
-bot.command('clear', async ctx => {
-  const chatId = ctx.chat.id;
-  const lastId = ctx.message.message_id;
-  for (let i = lastId; i > 0; i--) {
-    try { await ctx.telegram.deleteMessage(chatId, i); }
-    catch { break; }
-  }
-});
-
-// ================= DOCUMENT =================
+/* ================= DOCUMENT ================= */
 bot.on('document', async ctx => {
   const chat = getChat(ctx.chat.id);
   chat.chunks = [];
 
-  const doc = ctx.message.document;
-  const link = await ctx.telegram.getFileLink(doc.file_id);
-  const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
-  const uint8 = new Uint8Array(resp.data);
-  const name = doc.file_name || '';
+  await ctx.reply('Файл получен, обрабатываю…');
 
-  ctx.reply('Файл получен, обрабатываю…');
+  try {
+    const file = ctx.message.document;
+    const link = await ctx.telegram.getFileLink(file.file_id);
+    const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(resp.data);
+    const uint8 = new Uint8Array(resp.data);
+    const name = file.file_name || '';
 
-  if (/\.pdf$/i.test(name)) {
-    chat.chunks = await extractPdfChunks(uint8);
-  } else if (/\.docx$/i.test(name)) {
-    const r = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
-    chat.chunks = chunkText(r.value || '');
-  } else if (/\.xlsx$/i.test(name)) {
-    const wb = XLSX.read(uint8, { type: 'array' });
-    const text = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n');
-    chat.chunks = chunkText(text);
-  } else if (/\.pptx$/i.test(name)) {
-    const zip = await JSZip.loadAsync(uint8);
-    let text = '';
-    for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
-      const xml = await zip.files[f].async('string');
-      (xml.match(/<a:t>(.*?)<\/a:t>/g) || []).forEach(t => {
-        text += t.replace(/<[^>]+>/g, '') + ' ';
-      });
+    if (/\.pdf$/i.test(name)) {
+      chat.chunks = await extractPdfChunks(uint8);
     }
-    chat.chunks = chunkText(text);
-  } else {
-    return ctx.reply('Формат файла не поддерживается');
-  }
+    else if (/\.docx$/i.test(name)) {
+      const r = await mammoth.extractRawText({ buffer });
+      chat.chunks = chunkText(r.value || '');
+    }
+    else if (/\.xlsx$/i.test(name)) {
+      const wb = XLSX.read(uint8, { type: 'array' });
+      const text = wb.SheetNames
+        .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
+        .join('\n');
+      chat.chunks = chunkText(text);
+    }
+    else if (/\.csv$/i.test(name) || /\.txt$/i.test(name)) {
+      chat.chunks = chunkText(buffer.toString('utf8'));
+    }
+    else if (/\.pptx$/i.test(name)) {
+      const zip = await JSZip.loadAsync(uint8);
+      let text = '';
+      for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
+        const xml = await zip.files[f].async('string');
+        (xml.match(/<a:t>(.*?)<\/a:t>/g) || [])
+          .forEach(t => text += t.replace(/<[^>]+>/g, '') + ' ');
+      }
+      chat.chunks = chunkText(text);
+    }
+    else {
+      return ctx.reply('Формат файла не поддерживается.');
+    }
 
-  ctx.reply(`Готово. Частей: ${chat.chunks.length}`);
+    ctx.reply(`Готово. Загружено частей: ${chat.chunks.length}`);
+  } catch (e) {
+    console.error('Document error:', e);
+    ctx.reply('Ошибка обработки файла.');
+  }
 });
 
-// ================= ASK =================
-bot.command('ask', async ctx => {
+/* ================= TEXT ================= */
+bot.on('text', async ctx => {
   const chat = getChat(ctx.chat.id);
-  if (!chat.chunks.length) return ctx.reply('Нет загруженного контекста');
+  const question = ctx.message.text.trim();
+  if (!question) return;
 
-  const query = ctx.message.text.replace('/ask', '').trim();
-  if (!query) return ctx.reply('Напиши вопрос после /ask');
+  chat.history.push({ role: 'user', content: question });
+  if (chat.history.length > MAX_HISTORY) {
+    chat.history.splice(0, chat.history.length - MAX_HISTORY);
+  }
 
-  chat.history.push({ role: 'user', content: query });
-  if (chat.history.length > MAX_HISTORY) chat.history.shift();
-
-  const context = findRelevant(chat.chunks, query);
+  const context = chat.chunks.length
+    ? `Контекст документа:\n${findRelevant(chat.chunks, question)}`
+    : '';
 
   const res = await groq.chat.completions.create({
     model: 'llama-3.3-70b-versatile',
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       ...chat.history,
-      { role: 'user', content: `Контекст документа:\n${context}` }
+      ...(context ? [{ role: 'user', content: context }] : [])
     ],
-    max_tokens: 400
+    max_tokens: 500
   });
 
   const answer = res.choices[0].message.content;
+
   chat.history.push({ role: 'assistant', content: answer });
-  if (chat.history.length > MAX_HISTORY) chat.history.shift();
+  if (chat.history.length > MAX_HISTORY) {
+    chat.history.splice(0, chat.history.length - MAX_HISTORY);
+  }
 
   ctx.reply(answer);
 });
 
-// ================= WEBHOOK =================
-bot.on('document', async ctx => {
-  const chatId = ctx.chat.id;
-  const doc = ctx.message.document;
-
-  // ⚠️ СРАЗУ отвечаем Telegram
-  ctx.reply('Файл получен, обрабатываю…');
-
-  // ⬇️ Вся тяжёлая логика — вне webhook таймера
-  setImmediate(async () => {
-    try {
-      const chat = getChat(chatId);
-      chat.chunks = [];
-
-      const link = await ctx.telegram.getFileLink(doc.file_id);
-      const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
-      const uint8 = new Uint8Array(resp.data);
-      const name = doc.file_name || '';
-
-      debug('Processing document', name);
-
-      if (/\.pdf$/i.test(name)) {
-        chat.chunks = await extractPdfChunks(uint8);
-      } else if (/\.docx$/i.test(name)) {
-        const r = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
-        chat.chunks = chunkText(r.value || '');
-      } else if (/\.xlsx$/i.test(name)) {
-        const wb = XLSX.read(uint8, { type: 'array' });
-        const text = wb.SheetNames
-          .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
-          .join('\n');
-        chat.chunks = chunkText(text);
-      } else {
-        await ctx.reply('Формат файла не поддерживается');
-        return;
-      }
-
-      await ctx.reply(`Готово. Частей: ${chat.chunks.length}`);
-      debug('Document processed', chat.chunks.length);
-
-    } catch (e) {
-      console.error('Document processing error:', e);
-      await ctx.reply('Ошибка обработки файла');
-    }
-  });
-});
-
+/* ================= VERCEL WEBHOOK ================= */
+export default async function handler(req, res) {
+  if (req.method === 'POST') {
+    await bot.handleUpdate(req.body, res);
+    return res.status(200).end();
+  }
+  res.status(200).send('OK');
+}

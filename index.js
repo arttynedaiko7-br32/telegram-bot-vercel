@@ -1,6 +1,6 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import pdf from 'pdf-parse'; // ✅ НОВАЯ PDF библиотека
+import pdf from 'pdf-parse/lib/pdf-parse.js'; // ❗️ фикс для serverless
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
@@ -43,15 +43,16 @@ function getChat(chatId) {
   return chats.get(chatId);
 }
 
-/* ================= Iterative searching ================= */
-
+/* ================= ITERATIVE SEARCH ================= */
 function getIterativeDocContext(chat) {
-  const chunks = chat.chunks;
+  const { chunks, searchStep } = chat;
   const n = chunks.length;
   const STEP = 2;
 
+  if (!n) return null;
+
   // Шаг 0 — начало + середина + конец
-  if (chat.searchStep === 0) {
+  if (searchStep === 0) {
     chat.searchStep++;
     return [
       chunks[0],
@@ -62,17 +63,13 @@ function getIterativeDocContext(chat) {
       .join('\n');
   }
 
-  const step = chat.searchStep - 1;
-
+  const step = searchStep - 1;
   const left = step * STEP;
-  const right = n - (step * STEP) - STEP;
+  const right = n - STEP - step * STEP;
 
   chat.searchStep++;
 
-  // Если дошли до центра — стоп
-  if (left >= right) {
-    return null;
-  }
+  if (left >= right) return null;
 
   return [
     ...chunks.slice(left, left + STEP),
@@ -81,9 +78,6 @@ function getIterativeDocContext(chat) {
     .filter(Boolean)
     .join('\n');
 }
-
-
-
 
 /* ================= UTILS ================= */
 function chunkText(text) {
@@ -106,7 +100,10 @@ function findRelevant(chunks, query) {
 async function downloadTelegramFile(ctx, fileId) {
   const file = await ctx.telegram.getFile(fileId);
   const url = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`;
-  const resp = await axios.get(url, { responseType: 'arraybuffer' });
+
+  const resp = await axios.get(url, {
+    responseType: 'arraybuffer'
+  });
 
   if (resp.status !== 200) {
     throw new Error('File download failed');
@@ -118,7 +115,9 @@ async function downloadTelegramFile(ctx, fileId) {
 /* ================= PDF ================= */
 async function extractPdfText(buffer) {
   try {
-    const data = await pdf(buffer);
+    const data = await pdf(buffer, {
+      pagerender: null // ❗️ критично для Vercel
+    });
 
     if (!data.text || !data.text.trim()) {
       return '[PDF не содержит извлекаемый текст (возможно, это скан)]';
@@ -173,10 +172,9 @@ bot.on('document', async ctx => {
       const zip = await JSZip.loadAsync(buffer);
       for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
         const xml = await zip.files[f].async('string');
-        (xml.match(/<a:t>(.*?)<\/a:t>/g) || [])
-          .forEach(t => {
-            text += t.replace(/<[^>]+>/g, '') + ' ';
-          });
+        (xml.match(/<a:t>(.*?)<\/a:t>/g) || []).forEach(t => {
+          text += t.replace(/<[^>]+>/g, '') + ' ';
+        });
       }
 
     } else {
@@ -190,6 +188,7 @@ bot.on('document', async ctx => {
     chat.documentName = name;
     chat.chunks = chunkText(text);
     chat.searchStep = 0;
+
     ctx.reply(`Готово ✅\nФайл: ${name}\nЧастей: ${chat.chunks.length}`);
   } catch (e) {
     console.error('Document error:', e);
@@ -214,20 +213,20 @@ bot.on('text', async ctx => {
 
   if (chat.chunks.length) {
     let docContext = findRelevant(chat.chunks, question);
+
     if (!docContext) {
       docContext = getIterativeDocContext(chat);
 
-  if (!docContext) {
-    return ctx.reply(
-      '⚠️ В загруженном документе не найдено информации по этому вопросу.'
-    );
-  }
-}
+      if (!docContext) {
+        return ctx.reply(
+          '⚠️ В загруженном документе не найдено информации по этому вопросу.'
+        );
+      }
+    }
 
     messages.push({
       role: 'system',
-      content:
-        `Текст загруженного документа "${chat.documentName}". 
+      content: `Текст загруженного документа "${chat.documentName}".
 Используй его ТОЛЬКО если это релевантно вопросу:\n\n${docContext}`
     });
   }

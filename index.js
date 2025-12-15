@@ -10,13 +10,8 @@ import JSZip from 'jszip';
 pdfjsLib.GlobalWorkerOptions.workerSrc = null;
 
 // ================= ENV =================
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-
-if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
-  console.error('Missing ENV variables');
-  process.exit(1);
-}
+const GROQ_API_KEY = process.env.GROQ_API_KEY ?? '';
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? '';
 
 // ================= DEBUG =================
 const DEBUG = true;
@@ -227,41 +222,23 @@ bot.command('ask', async ctx => {
 
 // ================= WEBHOOK =================
 export default async function handler(req, res) {
-  // Telegram иногда делает GET-запросы
-  if (req.method !== 'POST') {
-    return res.status(200).send('OK');
-  }
-
   try {
-    // Vercel может передать body как строку или объект
-    let update = req.body;
-
-    if (!update) {
-      console.error('[WEBHOOK] Empty body');
-      return res.status(200).send('OK');
+    if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
+      console.error('Missing ENV variables');
+      return res.status(500).json({
+        error: 'Server misconfiguration'
+      });
     }
 
-    if (typeof update === 'string') {
-      try {
-        update = JSON.parse(update);
-      } catch (e) {
-        console.error('[WEBHOOK] JSON parse error', e);
-        return res.status(200).send('OK');
-      }
+    if (req.method !== 'POST') {
+      return res.status(405).send('Method Not Allowed');
     }
 
-    // Защита от мусора
-    if (!update.update_id) {
-      console.error('[WEBHOOK] Invalid update', update);
-      return res.status(200).send('OK');
-    }
-
-    await bot.handleUpdate(update);
-
+    await bot.handleUpdate(req.body);
     return res.status(200).send('OK');
-  } catch (error) {
-    // ❗ НИКОГДА не отдаём 500 Telegram
-    console.error('[WEBHOOK] Handler crash', error);
-    return res.status(200).send('OK');
+
+  } catch (err) {
+    console.error('Handler crash:', err);
+    return res.status(500).send('Internal Server Error');
   }
 }

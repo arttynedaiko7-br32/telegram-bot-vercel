@@ -6,6 +6,10 @@ import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
 import JSZip from 'jszip';
 
+/* ================= PDF WORKER FIX ================= */
+// 🔴 ОБЯЗАТЕЛЬНО для Vercel / Node.js
+pdfjs.GlobalWorkerOptions.workerSrc = null;
+
 /* ================= ENV ================= */
 const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
 
@@ -73,8 +77,8 @@ async function downloadTelegramFile(ctx, fileId) {
 }
 
 /* ================= PDF ================= */
-async function extractPdfText(uint8) {
-  const pdf = await pdfjs.getDocument({ data: uint8 }).promise;
+async function extractPdfText(buffer) {
+  const pdf = await pdfjs.getDocument({ data: buffer }).promise;
   let text = '';
 
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -105,19 +109,18 @@ bot.on('document', async ctx => {
 
   try {
     const buffer = await downloadTelegramFile(ctx, file.file_id);
-    const uint8 = new Uint8Array(buffer);
     const name = file.file_name || '';
     let text = '';
 
     if (/\.pdf$/i.test(name)) {
-      text = await extractPdfText(uint8);
+      text = await extractPdfText(buffer);
 
     } else if (/\.docx$/i.test(name)) {
       const r = await mammoth.extractRawText({ buffer });
       text = r.value || '';
 
     } else if (/\.xlsx$/i.test(name)) {
-      const wb = XLSX.read(uint8, { type: 'array' });
+      const wb = XLSX.read(buffer, { type: 'array' });
       text = wb.SheetNames
         .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
         .join('\n');
@@ -126,7 +129,7 @@ bot.on('document', async ctx => {
       text = buffer.toString('utf8');
 
     } else if (/\.pptx$/i.test(name)) {
-      const zip = await JSZip.loadAsync(uint8);
+      const zip = await JSZip.loadAsync(buffer);
       for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
         const xml = await zip.files[f].async('string');
         (xml.match(/<a:t>(.*?)<\/a:t>/g) || [])

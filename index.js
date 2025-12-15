@@ -1,6 +1,6 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import pdf from 'pdf-parse/lib/pdf-parse.js';
+import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
@@ -29,8 +29,8 @@ const SYSTEM_PROMPT = `
 Если пользователь загрузил документ:
 - считай его основным источником истины
 - отвечай ТОЛЬКО на основе документа, если вопрос о нём
-- если вопрос общий (например "о чём файл?") — дай краткое резюме документа
-- если информации недостаточно — прямо скажи об этом
+- если вопрос общий (например "о чём файл?") — дай краткое резюме
+- если информации нет — прямо скажи об этом
 
 Отвечай чётко, по делу, без выдумок.
 `;
@@ -59,6 +59,10 @@ function chunkText(text) {
   return chunks;
 }
 
+function isOverviewQuestion(text) {
+  return /о чем|про что|что за файл|кратко|суть|описание/i.test(text);
+}
+
 function findRelevant(chunks, query) {
   const words = query
     .toLowerCase()
@@ -68,16 +72,22 @@ function findRelevant(chunks, query) {
   if (!words.length) return '';
 
   return chunks
-    .filter(chunk => {
-      const c = chunk.toLowerCase();
-      return words.some(w => c.includes(w));
+    .filter(c => {
+      const lc = c.toLowerCase();
+      return words.some(w => lc.includes(w));
     })
     .slice(0, 3)
     .join('\n');
 }
 
-function isOverviewQuestion(text) {
-  return /о чем|про что|что за файл|кратко|суть|описание/i.test(text);
+function normalizeHistory(history) {
+  const clean = [];
+  for (const msg of history) {
+    if (!clean.length || clean[clean.length - 1].role !== msg.role) {
+      clean.push(msg);
+    }
+  }
+  return clean;
 }
 
 /* ================= ITERATIVE SEARCH ================= */
@@ -115,8 +125,8 @@ function getIterativeDocContext(chat) {
 async function downloadTelegramFile(ctx, fileId) {
   const file = await ctx.telegram.getFile(fileId);
   const url = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`;
-
   const resp = await axios.get(url, { responseType: 'arraybuffer' });
+
   if (resp.status !== 200) {
     throw new Error('File download failed');
   }
@@ -127,12 +137,10 @@ async function downloadTelegramFile(ctx, fileId) {
 /* ================= PDF ================= */
 async function extractPdfText(buffer) {
   try {
-    const data = await pdf(buffer, { pagerender: null });
-
+    const data = await pdf(buffer);
     if (!data.text || !data.text.trim()) {
-      return '[PDF не содержит извлекаемый текст (возможно, это скан)]';
+      return '[PDF не содержит извлекаемый текст]';
     }
-
     return data.text.trim();
   } catch (e) {
     console.error('PDF parse error:', e);
@@ -172,7 +180,7 @@ bot.on('document', async ctx => {
       text = wb.SheetNames
         .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
         .join('\n');
-    } else if (/\.csv$/i.test(name) || /\.txt$/i.test(name)) {
+    } else if (/\.csv$|\.txt$/i.test(name)) {
       text = buffer.toString('utf8');
     } else if (/\.pptx$/i.test(name)) {
       const zip = await JSZip.loadAsync(buffer);
@@ -209,11 +217,8 @@ bot.on('text', async ctx => {
 
   chat.searchStep = 0;
 
-  const messages = [
-    { role: 'system', content: SYSTEM_PROMPT }
-  ];
+  const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
 
-  // 📄 Документ как КОНТЕКСТ
   if (chat.chunks.length) {
     let docContext;
 
@@ -229,14 +234,14 @@ bot.on('text', async ctx => {
     if (docContext.length > MAX_DOC_CONTEXT) {
       docContext =
         docContext.slice(0, MAX_DOC_CONTEXT) +
-        '\n\n[Документ обрезан для контекста]';
+        '\n\n[Документ обрезан]';
     }
 
     messages.push({
       role: 'user',
       content: `
 Ниже приведён фрагмент документа "${chat.documentName}".
-Используй этот текст ТОЛЬКО как источник данных для ответа.
+Используй этот текст ТОЛЬКО как источник данных.
 
 === НАЧАЛО ДОКУМЕНТА ===
 ${docContext}
@@ -245,12 +250,10 @@ ${docContext}
     });
   }
 
-  // 🗣 История БЕЗ текущего вопроса
   messages.push(
-    ...chat.history.slice(-5)
+    ...normalizeHistory(chat.history).slice(-5)
   );
 
-  // 🧠 Текущий вопрос — ОДИН РАЗ
   messages.push({
     role: 'user',
     content: question
@@ -265,7 +268,6 @@ ${docContext}
 
     const answer = res.choices[0].message.content;
 
-    // 💾 сохраняем историю ПОСЛЕ успешного ответа
     chat.history.push({ role: 'user', content: question });
     chat.history.push({ role: 'assistant', content: answer });
 
@@ -279,7 +281,6 @@ ${docContext}
     ctx.reply('Ошибка генерации ответа.');
   }
 });
-
 
 /* ================= VERCEL HANDLER ================= */
 export default async function handler(req, res) {

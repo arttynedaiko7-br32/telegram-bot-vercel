@@ -227,7 +227,10 @@ bot.on('text', async ctx => {
     });
   }
 
-  messages.push(...chat.history);
+  messages.push(
+  ...chat.history.slice(-6) // максимум 6 последних сообщений
+);
+
 
   try {
     const res = await groq.chat.completions.create({

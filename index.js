@@ -8,6 +8,7 @@ import JSZip from 'jszip';
 
 /* ================= ENV ================= */
 const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
+
 if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
   throw new Error('Missing ENV variables');
 }
@@ -23,7 +24,7 @@ const MAX_HISTORY = 50;
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
 Помогаешь с кодом и техническими задачами.
-Если есть документ — используй его как источник знаний.
+Если есть документ — используй его как основной источник знаний.
 Отвечай чётко и по делу.
 `;
 
@@ -32,7 +33,12 @@ const chats = new Map();
 
 function getChat(chatId) {
   if (!chats.has(chatId)) {
-    chats.set(chatId, { history: [], chunks: [] });
+    chats.set(chatId, {
+      history: [],
+      chunks: [],
+      documentText: '',
+      documentName: ''
+    });
   }
   return chats.get(chatId);
 }
@@ -47,14 +53,27 @@ function chunkText(text) {
 }
 
 function findRelevant(chunks, query) {
-  return chunks
-    .filter(c => c.toLowerCase().includes(query.toLowerCase()))
-    .slice(0, 3)
-    .join('\n');
+  const q = query.toLowerCase();
+  const matches = chunks.filter(c => c.toLowerCase().includes(q));
+  return matches.slice(0, 3).join('\n');
+}
+
+/* ================= FILE DOWNLOAD ================= */
+async function downloadTelegramFile(ctx, fileId) {
+  const file = await ctx.telegram.getFile(fileId);
+  const url = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`;
+
+  const resp = await axios.get(url, { responseType: 'arraybuffer' });
+
+  if (resp.status !== 200 || !resp.data) {
+    throw new Error('Failed to download file');
+  }
+
+  return Buffer.from(resp.data);
 }
 
 /* ================= PDF ================= */
-async function extractPdfChunks(uint8) {
+async function extractPdfText(uint8) {
   const pdf = await pdfjs.getDocument({ data: uint8 }).promise;
   let text = '';
 
@@ -64,7 +83,7 @@ async function extractPdfChunks(uint8) {
     text += content.items.map(it => it.str).join(' ') + '\n';
   }
 
-  return chunkText(text);
+  return text;
 }
 
 /* ================= COMMANDS ================= */
@@ -74,88 +93,103 @@ bot.start(ctx => {
 
 bot.command('reset', ctx => {
   chats.delete(ctx.chat.id);
-  ctx.reply('Контекст и память очищены.');
+  ctx.reply('Контекст и загруженные документы очищены.');
 });
 
-/* ================= DOCUMENT ================= */
+/* ================= DOCUMENT HANDLER ================= */
 bot.on('document', async ctx => {
   const chat = getChat(ctx.chat.id);
-  chat.chunks = [];
+  const file = ctx.message.document;
 
   await ctx.reply('Файл получен, обрабатываю…');
 
   try {
-    const file = ctx.message.document;
-    const link = await ctx.telegram.getFileLink(file.file_id);
-    const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
-    const buffer = Buffer.from(resp.data);
-    const uint8 = new Uint8Array(resp.data);
+    const buffer = await downloadTelegramFile(ctx, file.file_id);
+    const uint8 = new Uint8Array(buffer);
     const name = file.file_name || '';
 
+    let text = '';
+
     if (/\.pdf$/i.test(name)) {
-      chat.chunks = await extractPdfChunks(uint8);
+      text = await extractPdfText(uint8);
+
     } else if (/\.docx$/i.test(name)) {
       const r = await mammoth.extractRawText({ buffer });
-      chat.chunks = chunkText(r.value || '');
+      text = r.value || '';
+
     } else if (/\.xlsx$/i.test(name)) {
       const wb = XLSX.read(uint8, { type: 'array' });
-      const text = wb.SheetNames
+      text = wb.SheetNames
         .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
         .join('\n');
-      chat.chunks = chunkText(text);
+
     } else if (/\.csv$/i.test(name) || /\.txt$/i.test(name)) {
-      chat.chunks = chunkText(buffer.toString('utf8'));
+      text = buffer.toString('utf8');
+
     } else if (/\.pptx$/i.test(name)) {
       const zip = await JSZip.loadAsync(uint8);
-      let text = '';
       for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
         const xml = await zip.files[f].async('string');
         (xml.match(/<a:t>(.*?)<\/a:t>/g) || [])
-          .forEach(t => text += t.replace(/<[^>]+>/g, '') + ' ');
+          .forEach(t => {
+            text += t.replace(/<[^>]+>/g, '') + ' ';
+          });
       }
-      chat.chunks = chunkText(text);
+
     } else {
       return ctx.reply('Формат файла не поддерживается.');
     }
 
-    ctx.reply(`Готово. Загружено частей: ${chat.chunks.length}`);
+    if (!text.trim()) {
+      return ctx.reply('Не удалось извлечь текст из файла.');
+    }
+
+    chat.documentText = text;
+    chat.documentName = name;
+    chat.chunks = chunkText(text);
+
+    ctx.reply(`Готово ✅\nФайл: ${name}\nЧастей: ${chat.chunks.length}`);
   } catch (e) {
     console.error('Document error:', e);
     ctx.reply('Ошибка обработки файла.');
   }
 });
 
-/* ================= TEXT ================= */
+/* ================= TEXT HANDLER ================= */
 bot.on('text', async ctx => {
   const chat = getChat(ctx.chat.id);
   const question = ctx.message.text.trim();
   if (!question) return;
+
+  if (!chat.chunks.length) {
+    return ctx.reply(
+      'Мне не был предоставлен файл. Пожалуйста, загрузите документ.'
+    );
+  }
 
   chat.history.push({ role: 'user', content: question });
   if (chat.history.length > MAX_HISTORY) {
     chat.history.splice(0, chat.history.length - MAX_HISTORY);
   }
 
-  const documentContext = chat.chunks.length
-    ? findRelevant(chat.chunks, question)
-    : '';
+  let documentContext = findRelevant(chat.chunks, question);
+
+  // если релевантных чанков нет — даём начало документа
+  if (!documentContext) {
+    documentContext = chat.chunks.slice(0, 2).join('\n');
+  }
 
   try {
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT }
-    ];
-
-    // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
-    if (documentContext) {
-      messages.push({
+      { role: 'system', content: SYSTEM_PROMPT },
+      {
         role: 'system',
         content:
-          `Ниже приведён текст загруженного документа.
-Используй его как основной источник информации для ответа:\n\n${documentContext}`
-      });
-    }
-
-    messages.push(...chat.history);
+          `Ниже приведён текст загруженного документа "${chat.documentName}".
+Используй его как основной источник информации:\n\n${documentContext}`
+      },
+      ...chat.history
+    ];
 
     const res = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
@@ -180,7 +214,7 @@ bot.on('text', async ctx => {
 /* ================= VERCEL WEBHOOK ================= */
 export default async function handler(req, res) {
   if (req.method === 'POST') {
-    await bot.handleUpdate(req.body, res);
+    await bot.handleUpdate(req.body);
     return res.status(200).end();
   }
   res.status(200).send('OK');

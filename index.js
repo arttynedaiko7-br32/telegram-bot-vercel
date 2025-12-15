@@ -212,10 +212,56 @@ bot.on('text', async ctx => {
 });
 
 /* ================= VERCEL WEBHOOK ================= */
-export default async function handler(req, res) {
-  if (req.method === 'POST') {
-    await bot.handleUpdate(req.body);
-    return res.status(200).end();
+bot.on('text', async ctx => {
+  const chat = getChat(ctx.chat.id);
+  const question = ctx.message.text.trim();
+  if (!question) return;
+
+  chat.history.push({ role: 'user', content: question });
+  if (chat.history.length > MAX_HISTORY) {
+    chat.history.splice(0, chat.history.length - MAX_HISTORY);
   }
-  res.status(200).send('OK');
-}
+
+  let messages = [
+    { role: 'system', content: SYSTEM_PROMPT }
+  ];
+
+  // 📄 Документ есть → добавляем контекст
+  if (chat.chunks.length) {
+    let documentContext = findRelevant(chat.chunks, question);
+
+    if (!documentContext) {
+      documentContext = chat.chunks.slice(0, 2).join('\n');
+    }
+
+    messages.push({
+      role: 'system',
+      content:
+        `Ниже приведён текст загруженного документа "${chat.documentName}".
+Используй его ТОЛЬКО если это релевантно вопросу:\n\n${documentContext}`
+    });
+  }
+
+  messages.push(...chat.history);
+
+  try {
+    const res = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages,
+      max_tokens: 500
+    });
+
+    const answer = res.choices[0].message.content;
+
+    chat.history.push({ role: 'assistant', content: answer });
+    if (chat.history.length > MAX_HISTORY) {
+      chat.history.splice(0, chat.history.length - MAX_HISTORY);
+    }
+
+    ctx.reply(answer);
+  } catch (e) {
+    console.error('LLM error:', e);
+    ctx.reply('Ошибка генерации ответа.');
+  }
+});
+

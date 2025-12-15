@@ -1,6 +1,9 @@
 # Node.js dependencies
 node_modules/
 
+#fail
+
+example_for_bot.js
 
 # dotenv environment variables file
 .env

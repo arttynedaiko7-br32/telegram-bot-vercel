@@ -48,31 +48,42 @@ function getChat(chatId) {
 function getIterativeDocContext(chat) {
   const chunks = chat.chunks;
   const n = chunks.length;
+  const STEP = 2;
 
-  // Шаг 0 — начало, середина, конец
+  // Шаг 0 — начало + середина + конец
   if (chat.searchStep === 0) {
     chat.searchStep++;
     return [
       chunks[0],
       chunks[Math.floor(n / 2)],
       chunks[n - 1]
-    ].filter(Boolean).join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
-  const left = chat.searchStep;
-  const right = n - chat.searchStep - 1;
+  const step = chat.searchStep - 1;
+
+  const left = step * STEP;
+  const right = n - (step * STEP) - STEP;
 
   chat.searchStep++;
 
-  if (left > right) {
-    return null; // всё обошли
+  // Если дошли до центра — стоп
+  if (left >= right) {
+    return null;
   }
 
   return [
-    chunks[left],
-    chunks[right]
-  ].filter(Boolean).join('\n');
+    ...chunks.slice(left, left + STEP),
+    ...chunks.slice(right, right + STEP)
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
+
+
+
 
 /* ================= UTILS ================= */
 function chunkText(text) {

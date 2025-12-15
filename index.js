@@ -192,13 +192,49 @@ bot.command('ask', async ctx => {
 });
 
 // ================= WEBHOOK =================
-export default async function handler(req, res) {
-  try {
-    if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
-    await bot.handleUpdate(req.body);
-    res.status(200).send('OK');
-  } catch (err) {
-    console.error('Handler error:', err);
-    res.status(500).send('Internal Server Error');
-  }
-}
+bot.on('document', async ctx => {
+  const chatId = ctx.chat.id;
+  const doc = ctx.message.document;
+
+  // ⚠️ СРАЗУ отвечаем Telegram
+  ctx.reply('Файл получен, обрабатываю…');
+
+  // ⬇️ Вся тяжёлая логика — вне webhook таймера
+  setImmediate(async () => {
+    try {
+      const chat = getChat(chatId);
+      chat.chunks = [];
+
+      const link = await ctx.telegram.getFileLink(doc.file_id);
+      const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
+      const uint8 = new Uint8Array(resp.data);
+      const name = doc.file_name || '';
+
+      debug('Processing document', name);
+
+      if (/\.pdf$/i.test(name)) {
+        chat.chunks = await extractPdfChunks(uint8);
+      } else if (/\.docx$/i.test(name)) {
+        const r = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
+        chat.chunks = chunkText(r.value || '');
+      } else if (/\.xlsx$/i.test(name)) {
+        const wb = XLSX.read(uint8, { type: 'array' });
+        const text = wb.SheetNames
+          .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
+          .join('\n');
+        chat.chunks = chunkText(text);
+      } else {
+        await ctx.reply('Формат файла не поддерживается');
+        return;
+      }
+
+      await ctx.reply(`Готово. Частей: ${chat.chunks.length}`);
+      debug('Document processed', chat.chunks.length);
+
+    } catch (e) {
+      console.error('Document processing error:', e);
+      await ctx.reply('Ошибка обработки файла');
+    }
+  });
+});
+

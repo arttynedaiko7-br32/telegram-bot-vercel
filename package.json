@@ -2,6 +2,14 @@
   "name": "tgai",
   "version": "1.0.0",
   "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node index.js",
+    "start": "node index.js"
+  },
   "dependencies": {
     "axios": "^1.13.2",
     "canvas": "^3.2.0",
@@ -9,6 +17,10 @@
     "groq-sdk": "^0.37.0",
     "mammoth": "^1.11.0",
     "pdfjs-dist": "^3.11.174",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+
+    "xlsx": "^0.18.5",
+    "jszip": "^3.10.1",
+    "pptxgenjs": "^3.12.0"
   }
 }

@@ -1,252 +1,235 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-
-// --- ВЕРНАЯ версия pdfjs-dist: 3.11.174 ---
 import pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
-
-// Подключаем библиотеку Groq
+import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
+import XLSX from 'xlsx';
+import JSZip from 'jszip';
 
-// ---------- ENV ----------
-// Получаем API ключи из переменных окружения Vercel
+// ================= ENV =================
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 
-if (!GROQ_API_KEY) {
-  console.error('Ошибка: переменная окружения GROQ_API_KEY не задана.');
-  process.exit(1);
-}
-if (!TELEGRAM_TOKEN) {
-  console.error('Ошибка: переменная окружения TELEGRAM_TOKEN не задана.');
+if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
+  console.error('Missing ENV variables');
   process.exit(1);
 }
 
-// Инициализация Groq с вашим API ключом
+// ================= DEBUG =================
+const DEBUG = true;
+function debug(...args) {
+  if (DEBUG) console.log('[DEBUG]', ...args);
+}
+
 const groq = new Groq({ apiKey: GROQ_API_KEY });
-
-// ---------- INIT ----------
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
-// ---------- MEMORY ----------
-const memory = new Map();
+// ================= CONFIG =================
 const MAX_HISTORY = 20;
-const MAX_TEXT_CHARS = 7000;
+const CHUNK_SIZE = 8000;        // символов
+const SUMMARY_TOKENS = 300;
+const SYSTEM_PROMPT = 'Ты — интеллектуальный помощник. Работай с большими документами эффективно.';
 
-const SYSTEM_PROMPT = 'Ты — интеллектуальный помощник. Запоминай контекст диалога. Отвечай чётко и по делу.';
+// ================= MEMORY =================
+const chats = new Map();
 
-// ---------- TMP DIR ----------
-const tmpDir = path.join(os.tmpdir(), 'tg_ai_files');
-if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+function getChat(chatId) {
+  if (!chats.has(chatId)) {
+    debug('Init chat memory', chatId);
+    chats.set(chatId, { history: [], chunks: [], summaries: [] });
+  }
+  return chats.get(chatId);
+}
 
-// --------------------------------------------------
-// START / HELP
-// --------------------------------------------------
-bot.start((ctx) => {
-  console.log('Бот запущен. Приветственное сообщение отправлено.');
-  ctx.reply(
-    `👋 Привет, ${ctx.from.first_name || 'друг'}!
+// ================= UTILS =================
+function chunkText(text, size = CHUNK_SIZE) {
+  debug('chunkText:start', { length: text.length, size });
+  const chunks = [];
+  for (let i = 0; i < text.length; i += size) {
+    chunks.push(text.slice(i, i + size));
+  }
+  debug('chunkText:done', { chunks: chunks.length });
+  return chunks;
+}
 
-Я AI-ассистент с памятью.
+async function extractPdfChunks(uint8, pagesPerChunk = 5) {
+  debug('extractPdfChunks:start', { bytes: uint8.length, pagesPerChunk });
+  const pdf = await pdfjsLib.getDocument({ data: uint8 }).promise;
+  debug('PDF loaded', { pages: pdf.numPages });
 
-Команды:
-/help — список команд
-/reset — очистить память
-/clear — очистить историю
+  const chunks = [];
+  let buffer = '';
+  let pageCounter = 0;
 
-Можешь отправлять файлы (txt, md, csv, json, pdf, docx).`
-  );
-});
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(it => it.str).join(' ');
 
-bot.command('help', (ctx) => {
-  ctx.reply(
-    '📌 Доступные команды:\n' +
-      '/start — запуск\n' +
-      '/help — список команд\n' +
-      '/reset — сбросить память\n' +
-      '/clear — очистить историю чата\n'
-  );
-});
+    buffer += pageText + '\n';
+    pageCounter++;
 
-bot.command('clear', async (ctx) => {
-  const chatId = ctx.chat.id;
-  const lastMessageId = ctx.message.message_id;
+    debug('PDF page read', { page: i, length: pageText.length });
 
-  memory.delete(chatId);
-
-  const batch = [];
-  for (let i = lastMessageId; i > 0; i--) {
-    batch.push(
-      ctx.telegram.deleteMessage(chatId, i).catch(() => {})
-    );
-
-    if (batch.length >= 30) {
-      await Promise.all(batch);
-      batch.length = 0;
+    if (pageCounter === pagesPerChunk) {
+      chunks.push(buffer);
+      debug('PDF chunk created', { index: chunks.length, length: buffer.length });
+      buffer = '';
+      pageCounter = 0;
     }
   }
 
-  await Promise.all(batch);
+  if (buffer.trim()) {
+    chunks.push(buffer);
+    debug('PDF last chunk', { index: chunks.length, length: buffer.length });
+  }
+
+  debug('extractPdfChunks:done', { chunks: chunks.length });
+  return chunks;
+}
+
+async function summarizeChunk(text) {
+  debug('summarizeChunk:start', { length: text.length });
+  const res = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages: [
+      { role: 'system', content: 'Сожми текст до ключевых тезисов.' },
+      { role: 'user', content: text }
+    ],
+    max_tokens: SUMMARY_TOKENS,
+    temperature: 0.2
+  });
+
+  const result = res.choices[0].message.content;
+  debug('summarizeChunk:done', { resultLength: result.length });
+  return result;
+}
+
+async function hierarchicalSummary(chunks, ctx) {
+  debug('hierarchicalSummary:start', { chunks: chunks.length });
+  const summaries = [];
+  let i = 1;
+
+  for (const chunk of chunks) {
+    ctx.reply(`⏳ Обработка части ${i}/${chunks.length}`);
+    debug('hierarchicalSummary:chunk', { index: i, length: chunk.length });
+    summaries.push(await summarizeChunk(chunk));
+    i++;
+  }
+
+  debug('hierarchicalSummary:first-level-done', { summaries: summaries.length });
+  const final = await summarizeChunk(summaries.join('\n'));
+  debug('hierarchicalSummary:final-done', { length: final.length });
+
+  return { summaries, final };
+}
+
+function findRelevant(chunks, query) {
+  debug('findRelevant:start', { query, chunks: chunks.length });
+  const found = chunks.filter(c => c.toLowerCase().includes(query.toLowerCase()));
+  debug('findRelevant:done', { matched: found.length });
+  return found.slice(0, 3).join('\n');
+}
+
+// ================= START =================
+bot.start(ctx => {
+  ctx.reply('📄 Отправь большой файл (PDF/DOCX/XLSX/PPTX).\n\nКоманды:\n/summary — краткое резюме\n/ask вопрос — вопрос по документу');
 });
 
-// ======================================================
-// ОБРАБОТКА ДОКУМЕНТОВ
-// ======================================================
+// ================= DOCUMENT =================
 bot.on('document', async (ctx) => {
-  const chatId = ctx.chat.id;
+  const chat = getChat(ctx.chat.id);
+  chat.chunks = [];
+  chat.summaries = [];
 
   try {
     const doc = ctx.message.document;
-    if (!doc) return ctx.reply('Нет документа в сообщении.');
+    const link = await ctx.telegram.getFileLink(doc.file_id);
+    const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
+    const uint8 = new Uint8Array(resp.data);
+    const name = doc.file_name || '';
 
-    const fileId = doc.file_id;
-    const fileName = doc.file_name || 'file';
-    const fileUrl = await ctx.telegram.getFileLink(fileId);
+    debug('Document received', { name, size: uint8.length });
+    ctx.reply('📥 Файл получен, начинаю обработку...');
 
-    const safeName = fileName.replace(/[/\\?%*:|"<>]/g, '_');
-    const filePath = path.join(tmpDir, safeName);
-
-    // Скачиваем файл (ПРЕОБРАЗУЕМ СРАЗУ В Uint8Array)
-    const resp = await axios.get(fileUrl.href, {
-      responseType: 'arraybuffer',
-      timeout: 120000,
-    });
-
-    const uint8 = new Uint8Array(resp.data); // ← КЛЮЧЕВОЙ МОМЕНТ
-
-    // Сохраняем временно (не обязательно, но пусть будет)
-    fs.writeFileSync(filePath, Buffer.from(uint8));
-
-    let text = '';
-
-    // TEXT / MD / CSV
-    if (/\.(txt|md|csv)$/i.test(fileName)) {
-      text = Buffer.from(uint8).toString('utf8');
+    if (/\.pdf$/i.test(name)) {
+      chat.chunks = await extractPdfChunks(uint8);
     }
-
-    // JSON
-    else if (/\.json$/i.test(fileName)) {
-      try {
-        text = JSON.stringify(JSON.parse(Buffer.from(uint8).toString('utf8')), null, 2);
-      } catch {
-        text = Buffer.from(uint8).toString('utf8');
+    else if (/\.docx$/i.test(name)) {
+      const r = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
+      chat.chunks = chunkText(r.value || '');
+    }
+    else if (/\.xlsx$/i.test(name)) {
+      const wb = XLSX.read(uint8, { type: 'array' });
+      const text = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n');
+      chat.chunks = chunkText(text);
+    }
+    else if (/\.pptx$/i.test(name)) {
+      const zip = await JSZip.loadAsync(uint8);
+      let text = '';
+      for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
+        const xml = await zip.files[f].async('string');
+        (xml.match(/<a:t>(.*?)<\/a:t>/g) || []).forEach(t => {
+          text += t.replace(/<[^>]+>/g, '') + ' ';
+        });
       }
+      chat.chunks = chunkText(text);
     }
-
-    // PDF
-    else if (/\.pdf$/i.test(fileName)) {
-      text = await extractPdfText(uint8);
-    }
-
-    // DOCX
-    else if (/\.docx$/i.test(fileName)) {
-      const result = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
-      text = result.value || '';
-    }
-
-    // UNSUPPORTED
     else {
-      try { fs.unlinkSync(filePath); } catch {}
-      return ctx.reply(
-        '❌ Этот формат файла не поддерживается (поддерживаются: txt, md, csv, json, pdf, docx).'
-      );
+      return ctx.reply('❌ Формат не поддерживается');
     }
 
-    // Ограничение длины
-    if (text.length > MAX_TEXT_CHARS) {
-      text = text.slice(0, MAX_TEXT_CHARS) + '\n...(обрезано)';
-    }
-
-    // Добавляем в контекст
-    if (!memory.has(chatId)) memory.set(chatId, []);
-    memory.get(chatId).push({
-      role: 'user',
-      content: `📄 Файл ${fileName} загружен:\n${text}`,
-    });
-
-    try { fs.unlinkSync(filePath); } catch {}
-
-    ctx.reply('📄 Файл загружен и добавлен в контекст!');
-  } catch (err) {
-    console.error('Ошибка обработки файла:', err);
-    ctx.reply('❌ Ошибка при обработке файла.');
+    debug('Document processed', { chunks: chat.chunks.length });
+    ctx.reply(`✅ Файл разобран. Частей: ${chat.chunks.length}\nИспользуй /summary или /ask`);
+  } catch (e) {
+    console.error(e);
+    ctx.reply('❌ Ошибка обработки файла');
   }
 });
 
-// ======================================================
-// ОБРАБОТКА ТЕКСТА
-// ======================================================
-bot.on('text', async (ctx) => {
-  const chatId = ctx.chat.id;
-  const msg = ctx.message.text;
+// ================= SUMMARY =================
+bot.command('summary', async (ctx) => {
+  const chat = getChat(ctx.chat.id);
+  if (!chat.chunks.length) return ctx.reply('Нет загруженного документа');
 
-  if (!memory.has(chatId)) memory.set(chatId, []);
+  ctx.reply('🧠 Создаю резюме документа...');
+  const { summaries, final } = await hierarchicalSummary(chat.chunks, ctx);
+  chat.summaries = summaries;
 
-  memory.get(chatId).push({ role: 'user', content: msg });
-
-  // Ограничиваем историю
-  if (memory.get(chatId).length > MAX_HISTORY) {
-    memory.set(chatId, memory.get(chatId).slice(-MAX_HISTORY));
-  }
-
-  try { await ctx.sendChatAction('typing'); } catch {}
-
-  try {
-    const response = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...memory.get(chatId),
-      ],
-      temperature: 0.2,
-      max_tokens: 800,
-    });
-
-    const answer = response?.choices?.[0]?.message?.content;
-
-    if (answer) {
-      memory.get(chatId).push({ role: 'assistant', content: answer });
-    }
-
-    ctx.reply(answer || 'Модель вернула пустой ответ.');
-  } catch (err) {
-    console.error('Ошибка Groq:', err);
-    ctx.reply('❌ Ошибка при запросе к модели.');
-  }
+  ctx.reply('📌 Итоговое резюме:\n\n' + final);
 });
 
-// --------------------------------------------------
-// Webhook Handler (Vercel)
-// --------------------------------------------------
+// ================= ASK =================
+bot.command('ask', async (ctx) => {
+  const chat = getChat(ctx.chat.id);
+  if (!chat.chunks.length) return ctx.reply('Нет загруженного документа');
 
+  const query = ctx.message.text.replace('/ask', '').trim();
+  if (!query) return ctx.reply('Напиши вопрос после /ask');
+
+  const relevant = findRelevant(chat.chunks, query);
+  if (!relevant) return ctx.reply('Ничего не найдено');
+
+  const res = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: `Контекст:\n${relevant}\n\nВопрос: ${query}` }
+    ],
+    max_tokens: 400
+  });
+
+  ctx.reply(res.choices[0].message.content);
+});
+
+// ================= WEBHOOK =================
 export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
   try {
-    if (req.method === 'POST') {
-      const update = req.body;
-
-      if (!update) {
-        console.error('Ошибка: Пустое тело запроса');
-        return res.status(400).send('Invalid request body');
-      }
-
-      // Логирование полученного обновления для отладки
-      console.log('Received update:', update);
-
-      // Обработка обновления с помощью Telegraf
-      await bot.handleUpdate(update);
-
-      return res.status(200).send('OK');
-    } else {
-      // Ответ на все GET-запросы
-      return res.status(405).send('Method Not Allowed');
-    }
-  } catch (err) {
-    console.error('Ошибка при обработке вебхука:', err);
-    return res.status(500).send('Internal Server Error');
+    await bot.handleUpdate(req.body);
+    res.status(200).send('OK');
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Error');
   }
 }
-
-
-

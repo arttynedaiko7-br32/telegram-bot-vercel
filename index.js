@@ -1,18 +1,21 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
-pdfjs.GlobalWorkerOptions.workerSrc = null;
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
 import JSZip from 'jszip';
 
-// ================= PDFJS FIX (Node/Vercel) =================
-pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+// ================= PDFJS FIX (Node / Vercel) =================
+pdfjs.GlobalWorkerOptions.workerSrc = null;
 
 // ================= ENV =================
-const GROQ_API_KEY = process.env.GROQ_API_KEY ?? '';
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+
+if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
+  throw new Error('Missing ENV variables GROQ_API_KEY or TELEGRAM_TOKEN');
+}
 
 // ================= DEBUG =================
 const DEBUG = true;
@@ -20,27 +23,24 @@ function debug(...args) {
   if (DEBUG) console.log('[DEBUG]', ...args);
 }
 
+// ================= INIT =================
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
 // ================= CONFIG =================
 const CHUNK_SIZE = 8000;
 const SUMMARY_TOKENS = 300;
-const MAX_HISTORY = 20; // диалоговая память
+const MAX_HISTORY = 20;
 
-const SYSTEM_PROMPT = `
-Ты — инженерный AI-ассистент.
+const SYSTEM_PROMPT = `Ты — инженерный AI-ассистент.
 
-Твоя задача:
-— помогать решать инженерные и технические задачи
-— писать, анализировать и исправлять код
-— объяснять архитектуру, алгоритмы и логику решений
-— разбирать ошибки и логи
+Помогаешь решать инженерные и технические задачи,
+писать и отлаживать код,
+объяснять архитектуру, алгоритмы и ошибки.
 
 Учитывай контекст диалога.
 Файлы используй только как дополнительный контекст.
-Отвечай чётко и по делу.
-`.trim();
+Отвечай чётко и по делу.`;
 
 // ================= MEMORY =================
 const chats = new Map();
@@ -48,39 +48,31 @@ const chats = new Map();
 function getChat(chatId) {
   if (!chats.has(chatId)) {
     debug('Init chat memory', chatId);
-    chats.set(chatId, {
-      chunks: [],
-      summaries: [],
-      history: [] // диалоговая память
-    });
+    chats.set(chatId, { history: [], chunks: [] });
   }
   return chats.get(chatId);
 }
 
 // ================= UTILS =================
 function chunkText(text, size = CHUNK_SIZE) {
-  debug('chunkText:start', { length: text.length, size });
   const chunks = [];
   for (let i = 0; i < text.length; i += size) {
     chunks.push(text.slice(i, i + size));
   }
-  debug('chunkText:done', { chunks: chunks.length });
+  debug('chunkText', { chunks: chunks.length });
   return chunks;
+}
+
+function findRelevant(chunks, query) {
+  return chunks
+    .filter(c => c.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 3)
+    .join('\n');
 }
 
 // ================= PDF =================
 async function extractPdfChunks(uint8, pagesPerChunk = 5) {
-  debug('extractPdfChunks:start', { bytes: uint8.length });
-
-  const loadingTask = pdfjs.getDocument({
-  data: uint8,
-  disableWorker: true
-});
-
-
-  const pdf = await loadingTask.promise;
-  debug('PDF loaded', { pages: pdf.numPages });
-
+  const pdf = await pdfjs.getDocument({ data: uint8, disableWorker: true }).promise;
   const chunks = [];
   let buffer = '';
   let counter = 0;
@@ -88,54 +80,45 @@ async function extractPdfChunks(uint8, pagesPerChunk = 5) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-
-    const pageText = content.items.map(it => it.str).join(' ');
-    buffer += pageText + '\n';
+    buffer += content.items.map(it => it.str).join(' ') + '\n';
     counter++;
-
-    debug(`PDF page ${i}`, { length: pageText.length });
 
     if (counter === pagesPerChunk) {
       chunks.push(buffer);
-      debug('PDF chunk created', { index: chunks.length, length: buffer.length });
       buffer = '';
       counter = 0;
     }
   }
 
-  if (buffer.trim()) {
-    chunks.push(buffer);
-    debug('PDF last chunk', { index: chunks.length, length: buffer.length });
-  }
-
-  debug('extractPdfChunks:done', { chunks: chunks.length });
+  if (buffer.trim()) chunks.push(buffer);
+  debug('PDF chunks', chunks.length);
   return chunks;
 }
 
 // ================= COMMANDS =================
 bot.start(ctx => {
-  ctx.reply('Инженерный AI-ассистент для решения технических задач и написания кода.');
+  ctx.reply('Инженерный AI-ассистент для помощи с кодом и инженерными задачами.');
 });
 
 bot.command('help', ctx => {
-  ctx.reply(`Доступные команды:\n\n/start — информация о боте\n/help — список команд\n/reset — очистить память и контекст\n/clear — очистить историю чата\n\nМожно задавать вопросы по инженерии и коду. Файлы используются как контекст.`);
+  ctx.reply(`/start — информация о боте
+/help — список команд
+/reset — очистить память
+/clear — очистить историю
+/ask <вопрос> — вопрос по загруженному контексту`);
 });
 
 bot.command('reset', ctx => {
   chats.delete(ctx.chat.id);
-  ctx.reply('🧹 Контекст и память очищены.');
+  ctx.reply('Память и контекст очищены.');
 });
 
 bot.command('clear', async ctx => {
   const chatId = ctx.chat.id;
-  const lastMessageId = ctx.message.message_id;
-
-  for (let i = lastMessageId; i > 0; i--) {
-    try {
-      await ctx.telegram.deleteMessage(chatId, i);
-    } catch {
-      break;
-    }
+  const lastId = ctx.message.message_id;
+  for (let i = lastId; i > 0; i--) {
+    try { await ctx.telegram.deleteMessage(chatId, i); }
+    catch { break; }
   }
 });
 
@@ -143,50 +126,39 @@ bot.command('clear', async ctx => {
 bot.on('document', async ctx => {
   const chat = getChat(ctx.chat.id);
   chat.chunks = [];
-  chat.summaries = [];
 
-  try {
-    const doc = ctx.message.document;
-    const link = await ctx.telegram.getFileLink(doc.file_id);
-    const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
-    const uint8 = new Uint8Array(resp.data);
-    const name = doc.file_name || '';
+  const doc = ctx.message.document;
+  const link = await ctx.telegram.getFileLink(doc.file_id);
+  const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
+  const uint8 = new Uint8Array(resp.data);
+  const name = doc.file_name || '';
 
-    debug('Document received', { name, size: uint8.length });
-    ctx.reply('Файл получен, обрабатываю...');
+  ctx.reply('Файл получен, обрабатываю…');
 
-    if (/\.pdf$/i.test(name)) {
-      chat.chunks = await extractPdfChunks(uint8);
-    } else if (/\.docx$/i.test(name)) {
-      const r = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
-      chat.chunks = chunkText(r.value || '');
-    } else if (/\.xlsx$/i.test(name)) {
-      const wb = XLSX.read(uint8, { type: 'array' });
-      const text = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n');
-      chat.chunks = chunkText(text);
-    } else if (/\.pptx$/i.test(name)) {
-      const zip = await JSZip.loadAsync(uint8);
-      let text = '';
-      for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
-        const xml = await zip.files[f].async('string');
-        (xml.match(/<a:t>(.*?)<\/a:t>/g) || []).forEach(t => {
-          text += t.replace(/<[^>]+>/g, '') + ' ';
-        });
-      }
-      chat.chunks = chunkText(text);
-    } else {
-      return ctx.reply('Формат файла не поддерживается');
+  if (/\.pdf$/i.test(name)) {
+    chat.chunks = await extractPdfChunks(uint8);
+  } else if (/\.docx$/i.test(name)) {
+    const r = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
+    chat.chunks = chunkText(r.value || '');
+  } else if (/\.xlsx$/i.test(name)) {
+    const wb = XLSX.read(uint8, { type: 'array' });
+    const text = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n');
+    chat.chunks = chunkText(text);
+  } else if (/\.pptx$/i.test(name)) {
+    const zip = await JSZip.loadAsync(uint8);
+    let text = '';
+    for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
+      const xml = await zip.files[f].async('string');
+      (xml.match(/<a:t>(.*?)<\/a:t>/g) || []).forEach(t => {
+        text += t.replace(/<[^>]+>/g, '') + ' ';
+      });
     }
-
-    chat.history.push({ role: 'user', content: `Загружен файл ${name}` });
-    if (chat.history.length > MAX_HISTORY) chat.history.shift();
-
-    debug('Document processed', { chunks: chat.chunks.length });
-    ctx.reply(`Готово. Частей: ${chat.chunks.length}`);
-  } catch (e) {
-    console.error(e);
-    ctx.reply('Ошибка обработки файла');
+    chat.chunks = chunkText(text);
+  } else {
+    return ctx.reply('Формат файла не поддерживается');
   }
+
+  ctx.reply(`Готово. Частей: ${chat.chunks.length}`);
 });
 
 // ================= ASK =================
@@ -201,7 +173,6 @@ bot.command('ask', async ctx => {
   if (chat.history.length > MAX_HISTORY) chat.history.shift();
 
   const context = findRelevant(chat.chunks, query);
-  if (!context) return ctx.reply('Ничего не найдено');
 
   const res = await groq.chat.completions.create({
     model: 'llama-3.3-70b-versatile',
@@ -220,26 +191,14 @@ bot.command('ask', async ctx => {
   ctx.reply(answer);
 });
 
-
 // ================= WEBHOOK =================
 export default async function handler(req, res) {
   try {
-    if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
-      console.error('Missing ENV variables');
-      return res.status(500).json({
-        error: 'Server misconfiguration'
-      });
-    }
-
-    if (req.method !== 'POST') {
-      return res.status(405).send('Method Not Allowed');
-    }
-
+    if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
     await bot.handleUpdate(req.body);
-    return res.status(200).send('OK');
-
+    res.status(200).send('OK');
   } catch (err) {
-    console.error('Handler crash:', err);
-    return res.status(500).send('Internal Server Error');
+    console.error('Handler error:', err);
+    res.status(500).send('Internal Server Error');
   }
 }

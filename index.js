@@ -20,6 +20,7 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 /* ================= CONFIG ================= */
 const CHUNK_SIZE = 6000;
 const MAX_HISTORY = 50;
+const MAX_DOC_CONTEXT = 4000; // ❗️КРИТИЧНО
 
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
@@ -51,7 +52,6 @@ function getIterativeDocContext(chat) {
 
   if (!n) return null;
 
-  // шаг 0 — начало + середина + конец
   if (chat.searchStep === 0) {
     chat.searchStep++;
     return [
@@ -117,9 +117,7 @@ async function downloadTelegramFile(ctx, fileId) {
 /* ================= PDF ================= */
 async function extractPdfText(buffer) {
   try {
-    const data = await pdf(buffer, {
-      pagerender: null
-    });
+    const data = await pdf(buffer, { pagerender: null });
 
     if (!data.text || !data.text.trim()) {
       return '[PDF не содержит извлекаемый текст (возможно, это скан)]';
@@ -156,20 +154,16 @@ bot.on('document', async ctx => {
 
     if (/\.pdf$/i.test(name)) {
       text = await extractPdfText(buffer);
-
     } else if (/\.docx$/i.test(name)) {
       const r = await mammoth.extractRawText({ buffer });
       text = r.value || '';
-
     } else if (/\.xlsx$/i.test(name)) {
       const wb = XLSX.read(buffer, { type: 'array' });
       text = wb.SheetNames
         .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
         .join('\n');
-
     } else if (/\.csv$/i.test(name) || /\.txt$/i.test(name)) {
       text = buffer.toString('utf8');
-
     } else if (/\.pptx$/i.test(name)) {
       const zip = await JSZip.loadAsync(buffer);
       for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
@@ -178,7 +172,6 @@ bot.on('document', async ctx => {
           text += t.replace(/<[^>]+>/g, '') + ' ';
         });
       }
-
     } else {
       return ctx.reply('Формат файла не поддерживается.');
     }
@@ -204,7 +197,6 @@ bot.on('text', async ctx => {
   const question = ctx.message.text.trim();
   if (!question) return;
 
-  // ❗️КРИТИЧНО: сброс поиска на каждый вопрос
   chat.searchStep = 0;
 
   chat.history.push({ role: 'user', content: question });
@@ -217,21 +209,21 @@ bot.on('text', async ctx => {
   ];
 
   if (chat.chunks.length) {
-    let docContext = findRelevant(chat.chunks, question);
+    let docContext = findRelevant(chat.chunks, question)
+      || getIterativeDocContext(chat)
+      || chat.chunks.slice(0, 3).join('\n');
 
-    if (!docContext) {
-      docContext = getIterativeDocContext(chat);
+    // ❗️ ОБРЕЗКА КОНТЕКСТА
+    if (docContext.length > MAX_DOC_CONTEXT) {
+      docContext =
+        docContext.slice(0, MAX_DOC_CONTEXT) +
+        '\n\n[Документ обрезан для контекста]';
     }
 
-    // fallback — даём общий контекст, а не отказываемся
-    if (!docContext) {
-      docContext = chat.chunks.slice(0, 3).join('\n');
-    }
-
+    // ❗️ ДОКУМЕНТ = user, НЕ system
     messages.push({
-      role: 'system',
-      content: `Текст загруженного документа "${chat.documentName}".
-Используй его ТОЛЬКО если это релевантно вопросу:\n\n${docContext}`
+      role: 'user',
+      content: `Вот выдержка из документа "${chat.documentName}":\n\n${docContext}`
     });
   }
 
@@ -253,7 +245,7 @@ bot.on('text', async ctx => {
 
     ctx.reply(answer);
   } catch (e) {
-    console.error('LLM error:', e);
+    console.error('LLM error FULL:', e?.response?.data || e);
     ctx.reply('Ошибка генерации ответа.');
   }
 });

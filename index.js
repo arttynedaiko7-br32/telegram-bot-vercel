@@ -209,13 +209,11 @@ bot.on('text', async ctx => {
 
   chat.searchStep = 0;
 
-  chat.history.push({ role: 'user', content: question });
-  if (chat.history.length > MAX_HISTORY) {
-    chat.history.splice(0, chat.history.length - MAX_HISTORY);
-  }
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT }
+  ];
 
-  const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
-
+  // 📄 Документ как КОНТЕКСТ
   if (chat.chunks.length) {
     let docContext;
 
@@ -247,7 +245,16 @@ ${docContext}
     });
   }
 
-  messages.push(...chat.history.slice(-6));
+  // 🗣 История БЕЗ текущего вопроса
+  messages.push(
+    ...chat.history.slice(-5)
+  );
+
+  // 🧠 Текущий вопрос — ОДИН РАЗ
+  messages.push({
+    role: 'user',
+    content: question
+  });
 
   try {
     const res = await groq.chat.completions.create({
@@ -258,7 +265,10 @@ ${docContext}
 
     const answer = res.choices[0].message.content;
 
+    // 💾 сохраняем историю ПОСЛЕ успешного ответа
+    chat.history.push({ role: 'user', content: question });
     chat.history.push({ role: 'assistant', content: answer });
+
     if (chat.history.length > MAX_HISTORY) {
       chat.history.splice(0, chat.history.length - MAX_HISTORY);
     }
@@ -269,6 +279,7 @@ ${docContext}
     ctx.reply('Ошибка генерации ответа.');
   }
 });
+
 
 /* ================= VERCEL HANDLER ================= */
 export default async function handler(req, res) {

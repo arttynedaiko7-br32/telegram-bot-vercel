@@ -20,13 +20,19 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 /* ================= CONFIG ================= */
 const CHUNK_SIZE = 6000;
 const MAX_HISTORY = 50;
-const MAX_DOC_CONTEXT = 4000; // ❗️КРИТИЧНО
+const MAX_DOC_CONTEXT = 4000;
 
+/* ================= SYSTEM PROMPT ================= */
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
-Помогаешь с кодом и техническими задачами.
-Если есть документ — используй его как источник знаний.
-Отвечай чётко и по делу.
+
+Если пользователь загрузил документ:
+- считай его основным источником истины
+- отвечай ТОЛЬКО на основе документа, если вопрос о нём
+- если вопрос общий (например "о чём файл?") — дай краткое резюме документа
+- если информации недостаточно — прямо скажи об этом
+
+Отвечай чётко, по делу, без выдумок.
 `;
 
 /* ================= MEMORY ================= */
@@ -42,6 +48,36 @@ function getChat(chatId) {
     });
   }
   return chats.get(chatId);
+}
+
+/* ================= HELPERS ================= */
+function chunkText(text) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE));
+  }
+  return chunks;
+}
+
+function findRelevant(chunks, query) {
+  const words = query
+    .toLowerCase()
+    .split(/[\s\-_,.]+/)
+    .filter(w => w.length > 3);
+
+  if (!words.length) return '';
+
+  return chunks
+    .filter(chunk => {
+      const c = chunk.toLowerCase();
+      return words.some(w => c.includes(w));
+    })
+    .slice(0, 3)
+    .join('\n');
+}
+
+function isOverviewQuestion(text) {
+  return /о чем|про что|что за файл|кратко|суть|описание/i.test(text);
 }
 
 /* ================= ITERATIVE SEARCH ================= */
@@ -73,32 +109,6 @@ function getIterativeDocContext(chat) {
     ...chunks.slice(left, left + STEP),
     ...chunks.slice(right, right + STEP)
   ].filter(Boolean).join('\n');
-}
-
-/* ================= UTILS ================= */
-function chunkText(text) {
-  const chunks = [];
-  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-    chunks.push(text.slice(i, i + CHUNK_SIZE));
-  }
-  return chunks;
-}
-
-function findRelevant(chunks, query) {
-  const words = query
-    .toLowerCase()
-    .split(/[\s\-_,.]+/)
-    .filter(w => w.length > 3);
-
-  if (!words.length) return '';
-
-  return chunks
-    .filter(chunk => {
-      const c = chunk.toLowerCase();
-      return words.some(w => c.includes(w));
-    })
-    .slice(0, 3)
-    .join('\n');
 }
 
 /* ================= FILE DOWNLOAD ================= */
@@ -204,33 +214,40 @@ bot.on('text', async ctx => {
     chat.history.splice(0, chat.history.length - MAX_HISTORY);
   }
 
-  const messages = [
-    { role: 'system', content: SYSTEM_PROMPT }
-  ];
+  const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
 
   if (chat.chunks.length) {
-    let docContext = findRelevant(chat.chunks, question)
-      || getIterativeDocContext(chat)
-      || chat.chunks.slice(0, 3).join('\n');
+    let docContext;
 
-    // ❗️ ОБРЕЗКА КОНТЕКСТА
+    if (isOverviewQuestion(question)) {
+      docContext = chat.chunks.slice(0, 5).join('\n');
+    } else {
+      docContext =
+        findRelevant(chat.chunks, question) ||
+        getIterativeDocContext(chat) ||
+        chat.chunks.slice(0, 3).join('\n');
+    }
+
     if (docContext.length > MAX_DOC_CONTEXT) {
       docContext =
         docContext.slice(0, MAX_DOC_CONTEXT) +
         '\n\n[Документ обрезан для контекста]';
     }
 
-    // ❗️ ДОКУМЕНТ = user, НЕ system
     messages.push({
       role: 'user',
-      content: `Вот выдержка из документа "${chat.documentName}":\n\n${docContext}`
+      content: `
+Ниже приведён фрагмент документа "${chat.documentName}".
+Используй этот текст ТОЛЬКО как источник данных для ответа.
+
+=== НАЧАЛО ДОКУМЕНТА ===
+${docContext}
+=== КОНЕЦ ДОКУМЕНТА ===
+`
     });
   }
 
-  messages.push(
-  ...chat.history.slice(-6) // максимум 6 последних сообщений
-);
-
+  messages.push(...chat.history.slice(-6));
 
   try {
     const res = await groq.chat.completions.create({

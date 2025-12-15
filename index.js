@@ -1,6 +1,7 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
+import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
+pdfjs.GlobalWorkerOptions.workerSrc = null;
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
@@ -71,11 +72,11 @@ function chunkText(text, size = CHUNK_SIZE) {
 async function extractPdfChunks(uint8, pagesPerChunk = 5) {
   debug('extractPdfChunks:start', { bytes: uint8.length });
 
-  const loadingTask = pdfjsLib.getDocument({
-    data: uint8,
-    disableWorker: true,
-    useSystemFonts: true
-  });
+  const loadingTask = pdfjs.getDocument({
+  data: uint8,
+  disableWorker: true
+});
+
 
   const pdf = await loadingTask.promise;
   debug('PDF loaded', { pages: pdf.numPages });

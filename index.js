@@ -178,7 +178,7 @@ bot.on('document', async ctx => {
 
     chat.documentName = name;
     chat.chunks = chunkText(text);
-
+    chat.searchStep = 0;
     ctx.reply(`Готово ✅\nФайл: ${name}\nЧастей: ${chat.chunks.length}`);
   } catch (e) {
     console.error('Document error:', e);

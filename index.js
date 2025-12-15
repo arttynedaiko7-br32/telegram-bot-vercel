@@ -23,7 +23,7 @@ const MAX_HISTORY = 50;
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
 Помогаешь с кодом и техническими задачами.
-Если есть документ — используй его как контекст.
+Если есть документ — используй его как источник знаний.
 Отвечай чётко и по делу.
 `;
 
@@ -94,22 +94,18 @@ bot.on('document', async ctx => {
 
     if (/\.pdf$/i.test(name)) {
       chat.chunks = await extractPdfChunks(uint8);
-    }
-    else if (/\.docx$/i.test(name)) {
+    } else if (/\.docx$/i.test(name)) {
       const r = await mammoth.extractRawText({ buffer });
       chat.chunks = chunkText(r.value || '');
-    }
-    else if (/\.xlsx$/i.test(name)) {
+    } else if (/\.xlsx$/i.test(name)) {
       const wb = XLSX.read(uint8, { type: 'array' });
       const text = wb.SheetNames
         .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
         .join('\n');
       chat.chunks = chunkText(text);
-    }
-    else if (/\.csv$/i.test(name) || /\.txt$/i.test(name)) {
+    } else if (/\.csv$/i.test(name) || /\.txt$/i.test(name)) {
       chat.chunks = chunkText(buffer.toString('utf8'));
-    }
-    else if (/\.pptx$/i.test(name)) {
+    } else if (/\.pptx$/i.test(name)) {
       const zip = await JSZip.loadAsync(uint8);
       let text = '';
       for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
@@ -118,8 +114,7 @@ bot.on('document', async ctx => {
           .forEach(t => text += t.replace(/<[^>]+>/g, '') + ' ');
       }
       chat.chunks = chunkText(text);
-    }
-    else {
+    } else {
       return ctx.reply('Формат файла не поддерживается.');
     }
 
@@ -141,28 +136,45 @@ bot.on('text', async ctx => {
     chat.history.splice(0, chat.history.length - MAX_HISTORY);
   }
 
-  const context = chat.chunks.length
-    ? `Контекст документа:\n${findRelevant(chat.chunks, question)}`
+  const documentContext = chat.chunks.length
+    ? findRelevant(chat.chunks, question)
     : '';
 
-  const res = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...chat.history,
-      ...(context ? [{ role: 'user', content: context }] : [])
-    ],
-    max_tokens: 500
-  });
+  try {
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT }
+    ];
 
-  const answer = res.choices[0].message.content;
+    // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+    if (documentContext) {
+      messages.push({
+        role: 'system',
+        content:
+          `Ниже приведён текст загруженного документа.
+Используй его как основной источник информации для ответа:\n\n${documentContext}`
+      });
+    }
 
-  chat.history.push({ role: 'assistant', content: answer });
-  if (chat.history.length > MAX_HISTORY) {
-    chat.history.splice(0, chat.history.length - MAX_HISTORY);
+    messages.push(...chat.history);
+
+    const res = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages,
+      max_tokens: 500
+    });
+
+    const answer = res.choices[0].message.content;
+
+    chat.history.push({ role: 'assistant', content: answer });
+    if (chat.history.length > MAX_HISTORY) {
+      chat.history.splice(0, chat.history.length - MAX_HISTORY);
+    }
+
+    ctx.reply(answer);
+  } catch (e) {
+    console.error('LLM error:', e);
+    ctx.reply('Ошибка генерации ответа.');
   }
-
-  ctx.reply(answer);
 });
 
 /* ================= VERCEL WEBHOOK ================= */

@@ -5,14 +5,11 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import Groq from "groq-sdk";
-
-// --- ВЕРНАЯ версия pdfjs-dist: 3.11.174 ---
-import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+import { PDFDocument } from "pdf-lib";  // Импортируем библиотеку pdf-lib
 
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 if (!GROQ_API_KEY) {
   console.error("Ошибка: переменная окружения GROQ_API_KEY не задана.");
@@ -20,10 +17,6 @@ if (!GROQ_API_KEY) {
 }
 if (!TELEGRAM_TOKEN) {
   console.error("Ошибка: переменная окружения TELEGRAM_TOKEN не задана.");
-  process.exit(1);
-}
-if (!WEBHOOK_URL) {
-  console.error("Ошибка: переменная окружения WEBHOOK_URL не задана.");
   process.exit(1);
 }
 
@@ -111,7 +104,7 @@ bot.on("document", async (ctx) => {
     } else if (/\.json$/i.test(fileName)) {
       text = JSON.stringify(JSON.parse(Buffer.from(uint8).toString("utf8")), null, 2);
     } else if (/\.pdf$/i.test(fileName)) {
-      text = await extractPdfText(uint8);
+      text = await extractPdfText(uint8); // Используем функцию для извлечения текста из PDF
     } else if (/\.docx$/i.test(fileName)) {
       const result = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
       text = result.value || "";
@@ -138,6 +131,28 @@ bot.on("document", async (ctx) => {
     ctx.reply("❌ Ошибка при обработке файла.");
   }
 });
+
+// ======================================================
+// Функция для извлечения текста из PDF с использованием pdf-lib
+// ======================================================
+const extractPdfText = async (pdfData) => {
+  try {
+    const pdfDoc = await PDFDocument.load(pdfData);  // Загружаем PDF
+    const pages = pdfDoc.getPages();  // Получаем страницы PDF
+    let text = "";
+
+    // Для каждой страницы извлекаем текст
+    pages.forEach((page) => {
+      const textContent = page.getTextContent();
+      text += textContent.items.map(item => item.str).join(" ");
+    });
+
+    return text;
+  } catch (error) {
+    console.error("Ошибка при извлечении текста из PDF:", error);
+    return "Не удалось извлечь текст из PDF.";
+  }
+};
 
 // ======================================================
 // ОБРАБОТКА ТЕКСТА
@@ -180,13 +195,13 @@ bot.on("text", async (ctx) => {
 });
 
 // --------------------------------------------------
-// ВЕРСЕЛЬ WEBHOOK
+// ВЕРСЕЛЬ WEBHOOK (обработка webhook в коде)
 // --------------------------------------------------
 export default async function handler(req, res) {
   if (req.method === "POST") {
     try {
       const update = req.body;
-      await bot.handleUpdate(update);
+      await bot.handleUpdate(update);  // Обработка webhook
       return res.status(200).end();
     } catch (err) {
       console.error("Ошибка в обработке webhook:", err);
@@ -196,6 +211,3 @@ export default async function handler(req, res) {
 
   return res.status(200).send("OK");
 }
-
-// Настройка webhook
-bot.telegram.setWebhook(WEBHOOK_URL);

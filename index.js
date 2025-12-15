@@ -1,6 +1,5 @@
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
 import XLSX from 'xlsx';
@@ -18,21 +17,19 @@ const bot = new Telegraf(TELEGRAM_TOKEN);
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
 /* ================= CONFIG ================= */
-const CHUNK_SIZE = 6000;
 const MAX_HISTORY = 50;
-const MAX_DOC_CONTEXT = 4000;
+const MAX_DOC_LENGTH = 8000;
 
 /* ================= SYSTEM PROMPT ================= */
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
 
 Если пользователь загрузил документ:
-- считай его основным источником истины
-- отвечай ТОЛЬКО на основе документа, если вопрос о нём
-- если вопрос общий (например "о чём файл?") — дай краткое резюме
+- используй его как основной источник
+- не выдумывай факты
 - если информации нет — прямо скажи об этом
 
-Отвечай чётко, по делу, без выдумок.
+Отвечай чётко и по делу.
 `;
 
 /* ================= MEMORY ================= */
@@ -42,83 +39,11 @@ function getChat(chatId) {
   if (!chats.has(chatId)) {
     chats.set(chatId, {
       history: [],
-      chunks: [],
-      documentName: '',
-      searchStep: 0
+      documentText: '',
+      documentName: ''
     });
   }
   return chats.get(chatId);
-}
-
-/* ================= HELPERS ================= */
-function chunkText(text) {
-  const chunks = [];
-  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-    chunks.push(text.slice(i, i + CHUNK_SIZE));
-  }
-  return chunks;
-}
-
-function isOverviewQuestion(text) {
-  return /о чем|про что|что за файл|кратко|суть|описание/i.test(text);
-}
-
-function findRelevant(chunks, query) {
-  const words = query
-    .toLowerCase()
-    .split(/[\s\-_,.]+/)
-    .filter(w => w.length > 3);
-
-  if (!words.length) return '';
-
-  return chunks
-    .filter(c => {
-      const lc = c.toLowerCase();
-      return words.some(w => lc.includes(w));
-    })
-    .slice(0, 3)
-    .join('\n');
-}
-
-function normalizeHistory(history) {
-  const clean = [];
-  for (const msg of history) {
-    if (!clean.length || clean[clean.length - 1].role !== msg.role) {
-      clean.push(msg);
-    }
-  }
-  return clean;
-}
-
-/* ================= ITERATIVE SEARCH ================= */
-function getIterativeDocContext(chat) {
-  const chunks = chat.chunks;
-  const n = chunks.length;
-  const STEP = 2;
-
-  if (!n) return null;
-
-  if (chat.searchStep === 0) {
-    chat.searchStep++;
-    return [
-      chunks[0],
-      chunks[Math.floor(n / 2)],
-      chunks[n - 1]
-    ].filter(Boolean).join('\n');
-  }
-
-  const step = chat.searchStep - 1;
-  const left = step * STEP;
-  const right = n - STEP - step * STEP;
-
-  chat.searchStep++;
-
-  if (left >= right) return null;
-
-  return [
-    ...chunks.slice(left, left + STEP),
-    ...chunks.slice(right, right + STEP)
-  ].filter(Boolean).join('\n');
 }
 
 /* ================= FILE DOWNLOAD ================= */
@@ -132,20 +57,6 @@ async function downloadTelegramFile(ctx, fileId) {
   }
 
   return Buffer.from(resp.data);
-}
-
-/* ================= PDF ================= */
-async function extractPdfText(buffer) {
-  try {
-    const data = await pdf(buffer);
-    if (!data.text || !data.text.trim()) {
-      return '[PDF не содержит извлекаемый текст]';
-    }
-    return data.text.trim();
-  } catch (e) {
-    console.error('PDF parse error:', e);
-    throw new Error('Не удалось обработать PDF');
-  }
 }
 
 /* ================= COMMANDS ================= */
@@ -170,18 +81,19 @@ bot.on('document', async ctx => {
     const name = file.file_name || '';
     let text = '';
 
-    if (/\.pdf$/i.test(name)) {
-      text = await extractPdfText(buffer);
-    } else if (/\.docx$/i.test(name)) {
+    if (/\.docx$/i.test(name)) {
       const r = await mammoth.extractRawText({ buffer });
       text = r.value || '';
+
     } else if (/\.xlsx$/i.test(name)) {
       const wb = XLSX.read(buffer, { type: 'array' });
       text = wb.SheetNames
         .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
         .join('\n');
+
     } else if (/\.csv$|\.txt$/i.test(name)) {
       text = buffer.toString('utf8');
+
     } else if (/\.pptx$/i.test(name)) {
       const zip = await JSZip.loadAsync(buffer);
       for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
@@ -190,6 +102,7 @@ bot.on('document', async ctx => {
           text += t.replace(/<[^>]+>/g, '') + ' ';
         });
       }
+
     } else {
       return ctx.reply('Формат файла не поддерживается.');
     }
@@ -198,11 +111,15 @@ bot.on('document', async ctx => {
       return ctx.reply('Не удалось извлечь текст из файла.');
     }
 
-    chat.documentName = name;
-    chat.chunks = chunkText(text);
-    chat.searchStep = 0;
+    // ограничиваем размер документа
+    if (text.length > MAX_DOC_LENGTH) {
+      text = text.slice(0, MAX_DOC_LENGTH) + '\n\n[Документ обрезан]';
+    }
 
-    ctx.reply(`Готово ✅\nФайл: ${name}\nЧастей: ${chat.chunks.length}`);
+    chat.documentName = name;
+    chat.documentText = text;
+
+    ctx.reply(`Готово ✅\nФайл: ${name}`);
   } catch (e) {
     console.error('Document error:', e);
     ctx.reply('Ошибка обработки файла.');
@@ -215,49 +132,28 @@ bot.on('text', async ctx => {
   const question = ctx.message.text.trim();
   if (!question) return;
 
-  chat.searchStep = 0;
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT }
+  ];
 
-  const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
-
-  if (chat.chunks.length) {
-    let docContext;
-
-    if (isOverviewQuestion(question)) {
-      docContext = chat.chunks.slice(0, 5).join('\n');
-    } else {
-      docContext =
-        findRelevant(chat.chunks, question) ||
-        getIterativeDocContext(chat) ||
-        chat.chunks.slice(0, 3).join('\n');
-    }
-
-    if (docContext.length > MAX_DOC_CONTEXT) {
-      docContext =
-        docContext.slice(0, MAX_DOC_CONTEXT) +
-        '\n\n[Документ обрезан]';
-    }
-
+  if (chat.documentText) {
     messages.push({
       role: 'user',
       content: `
-Ниже приведён фрагмент документа "${chat.documentName}".
-Используй этот текст ТОЛЬКО как источник данных.
+Ниже приведён текст документа "${chat.documentName}".
+Используй его как источник информации.
 
-=== НАЧАЛО ДОКУМЕНТА ===
-${docContext}
+=== ДОКУМЕНТ ===
+${chat.documentText}
 === КОНЕЦ ДОКУМЕНТА ===
 `
     });
   }
 
   messages.push(
-    ...normalizeHistory(chat.history).slice(-5)
+    ...chat.history.slice(-6),
+    { role: 'user', content: question }
   );
-
-  messages.push({
-    role: 'user',
-    content: question
-  });
 
   try {
     const res = await groq.chat.completions.create({

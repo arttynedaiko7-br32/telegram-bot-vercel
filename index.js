@@ -36,10 +36,42 @@ function getChat(chatId) {
     chats.set(chatId, {
       history: [],
       chunks: [],
-      documentName: ''
+      documentName: '',
+      searchStep: 0
     });
   }
   return chats.get(chatId);
+}
+
+/* ================= Iterative searching ================= */
+
+function getIterativeDocContext(chat) {
+  const chunks = chat.chunks;
+  const n = chunks.length;
+
+  // Шаг 0 — начало, середина, конец
+  if (chat.searchStep === 0) {
+    chat.searchStep++;
+    return [
+      chunks[0],
+      chunks[Math.floor(n / 2)],
+      chunks[n - 1]
+    ].filter(Boolean).join('\n');
+  }
+
+  const left = chat.searchStep;
+  const right = n - chat.searchStep - 1;
+
+  chat.searchStep++;
+
+  if (left > right) {
+    return null; // всё обошли
+  }
+
+  return [
+    chunks[left],
+    chunks[right]
+  ].filter(Boolean).join('\n');
 }
 
 /* ================= UTILS ================= */
@@ -172,8 +204,14 @@ bot.on('text', async ctx => {
   if (chat.chunks.length) {
     let docContext = findRelevant(chat.chunks, question);
     if (!docContext) {
-      docContext = chat.chunks.slice(0, 2).join('\n');
-    }
+      docContext = getIterativeDocContext(chat);
+
+  if (!docContext) {
+    return ctx.reply(
+      '⚠️ В загруженном документе не найдено информации по этому вопросу.'
+    );
+  }
+}
 
     messages.push({
       role: 'system',

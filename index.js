@@ -1,102 +1,201 @@
-import { Telegraf } from 'telegraf';
-import Groq from 'groq-sdk';
+import "dotenv/config";
+import { Telegraf } from "telegraf";
+import axios from "axios";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import Groq from "groq-sdk";
 
-/* ========= ENV ========= */
-const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
-if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
-  throw new Error('Missing environment variables');
+// --- ВЕРНАЯ версия pdfjs-dist: 3.11.174 ---
+import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+
+// ---------- ENV ----------
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
+
+if (!GROQ_API_KEY) {
+  console.error("Ошибка: переменная окружения GROQ_API_KEY не задана.");
+  process.exit(1);
+}
+if (!TELEGRAM_TOKEN) {
+  console.error("Ошибка: переменная окружения TELEGRAM_TOKEN не задана.");
+  process.exit(1);
+}
+if (!WEBHOOK_URL) {
+  console.error("Ошибка: переменная окружения WEBHOOK_URL не задана.");
+  process.exit(1);
 }
 
-/* ========= INIT ========= */
-const bot = new Telegraf(TELEGRAM_TOKEN);
+// Инициализация Groq с вашим API ключом
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-/* ========= CONFIG ========= */
-const CONFIG = {
-  MAX_HISTORY: 50,
-  PROMPT_HISTORY_LIMIT: 10,
-  MAX_QUESTION_LENGTH: 3000,
-  MODEL: 'mixtral-8x7b-32768',
-  MAX_TOKENS: 500
-};
+// ---------- INIT ----------
+const bot = new Telegraf(TELEGRAM_TOKEN);
 
-const SYSTEM_PROMPT = `
-Ты инженерный AI-ассистент.
-Помогаешь решать инженерные, математические задачи и писать код.
-Отвечай четко, без догадок и выдумок.
-`.trim();
+// ---------- MEMORY ----------
+const memory = new Map();
+const MAX_HISTORY = 50;
+const MAX_TEXT_CHARS = 10000;
 
-/* ========= MEMORY ========= */
-const chats = new Map();
+const SYSTEM_PROMPT =
+  "Ты — интеллектуальный ассистент девушка. Запоминай контекст диалога. Отвечай чётко и по делу.";
 
-const getChat = chatId => {
-  if (!chats.has(chatId)) chats.set(chatId, { history: [] });
-  return chats.get(chatId);
-};
+// ---------- TMP DIR ----------
+const tmpDir = path.join(os.tmpdir(), "tg_ai_files");
+if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-/* ========= COMMANDS ========= */
-bot.start(ctx => ctx.reply('Привет! Я инженерный AI-ассистент 👋'));
+// --------------------------------------------------
+// START / HELP
+// --------------------------------------------------
+bot.start((ctx) => {
+  console.log("Бот запущен. Приветственное сообщение отправлено.");
+  ctx.reply(
+    `👋 Привет, ${ctx.from.first_name || "друг"}!
 
-bot.command('reset', ctx => {
-  chats.delete(ctx.chat.id);
-  ctx.reply('Контекст диалога очищен.');
+Я AI-ассистент с памятью.
+
+Команды:
+/help — список команд
+/reset — очистить память
+/clear — очистить историю
+
+Можешь отправлять файлы (txt, md, csv, json, pdf, docx).`
+  );
 });
 
-/* ========= TEXT HANDLER ========= */
-bot.on('text', async ctx => {
-  const question = ctx.message.text?.trim();
-  if (!question) return;
+bot.command("help", (ctx) => {
+  ctx.reply(
+    "📌 Доступные команды:\n" +
+      "/start — запуск\n" +
+      "/help — список команд\n" +
+      "/reset — сбросить память\n" +
+      "/clear — очистить историю чата\n"
+  );
+});
 
-  if (question.length > CONFIG.MAX_QUESTION_LENGTH) {
-    return ctx.reply('Сообщение слишком длинное.');
-  }
+bot.command("clear", async (ctx) => {
+  const chatId = ctx.chat.id;
+  memory.delete(chatId);
+  ctx.reply("История чата очищена!");
+});
 
-  const chat = getChat(ctx.chat.id);
-
-  const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    ...chat.history.slice(-CONFIG.PROMPT_HISTORY_LIMIT),
-    { role: 'user', content: question }
-  ];
-
+// ======================================================
+// ОБРАБОТКА ДОКУМЕНТОВ
+// ======================================================
+bot.on("document", async (ctx) => {
+  const chatId = ctx.chat.id;
   try {
-    const { choices } = await groq.chat.completions.create({
-      model: CONFIG.MODEL,
-      messages,
-      max_tokens: CONFIG.MAX_TOKENS
+    const doc = ctx.message.document;
+    if (!doc) return ctx.reply("Нет документа в сообщении.");
+
+    const fileId = doc.file_id;
+    const fileName = doc.file_name || "file";
+    const fileUrl = await ctx.telegram.getFileLink(fileId);
+
+    const safeName = fileName.replace(/[/\\?%*:|"<>]/g, "_");
+    const filePath = path.join(tmpDir, safeName);
+
+    const resp = await axios.get(fileUrl.href, {
+      responseType: "arraybuffer",
+      timeout: 120000,
     });
 
-    const answer = choices?.[0]?.message?.content;
-    if (!answer) throw new Error('Empty model response');
+    const uint8 = new Uint8Array(resp.data);
+    fs.writeFileSync(filePath, Buffer.from(uint8));
 
-    chat.history.push(
-      { role: 'user', content: question },
-      { role: 'assistant', content: answer }
-    );
+    let text = "";
 
-    chat.history.splice(
-      0,
-      Math.max(0, chat.history.length - CONFIG.MAX_HISTORY)
-    );
+    if (/\.(txt|md|csv)$/i.test(fileName)) {
+      text = Buffer.from(uint8).toString("utf8");
+    } else if (/\.json$/i.test(fileName)) {
+      text = JSON.stringify(JSON.parse(Buffer.from(uint8).toString("utf8")), null, 2);
+    } else if (/\.pdf$/i.test(fileName)) {
+      text = await extractPdfText(uint8);
+    } else if (/\.docx$/i.test(fileName)) {
+      const result = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
+      text = result.value || "";
+    } else {
+      try { fs.unlinkSync(filePath); } catch {}
+      return ctx.reply("❌ Этот формат файла не поддерживается.");
+    }
 
-    ctx.reply(answer);
+    if (text.length > MAX_TEXT_CHARS) {
+      text = text.slice(0, MAX_TEXT_CHARS) + "\n...(обрезано)";
+    }
 
+    if (!memory.has(chatId)) memory.set(chatId, []);
+    memory.get(chatId).push({
+      role: "user",
+      content: `📄 Файл ${fileName} загружен:\n${text}`,
+    });
+
+    try { fs.unlinkSync(filePath); } catch {}
+
+    ctx.reply("📄 Файл загружен и добавлен в контекст!");
   } catch (err) {
-    console.error('GROQ ERROR:', err?.message || err);
-    ctx.reply('Ошибка генерации ответа.');
+    console.error("Ошибка обработки файла:", err);
+    ctx.reply("❌ Ошибка при обработке файла.");
   }
 });
 
-/* ========= VERCEL HANDLER ========= */
-export default async function handler(req, res) {
-  try {
-    if (req.method === 'POST') {
-      await bot.handleUpdate(req.body);
-      return res.status(200).end();
-    }
-    res.status(200).send('OK');
-  } catch (err) {
-    console.error('Handler error:', err);
-    res.status(500).send('Internal error');
+// ======================================================
+// ОБРАБОТКА ТЕКСТА
+// ======================================================
+bot.on("text", async (ctx) => {
+  const chatId = ctx.chat.id;
+  const msg = ctx.message.text;
+
+  if (!memory.has(chatId)) memory.set(chatId, []);
+  memory.get(chatId).push({ role: "user", content: msg });
+
+  if (memory.get(chatId).length > MAX_HISTORY) {
+    memory.set(chatId, memory.get(chatId).slice(-MAX_HISTORY));
   }
+
+  try { await ctx.sendChatAction("typing"); } catch {}
+
+  try {
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...memory.get(chatId),
+      ],
+      temperature: 0.2,
+      max_tokens: 800,
+    });
+
+    const answer = response?.choices?.[0]?.message?.content;
+
+    if (answer) {
+      memory.get(chatId).push({ role: "assistant", content: answer });
+    }
+
+    ctx.reply(answer || "Модель вернула пустой ответ.");
+  } catch (err) {
+    console.error("Ошибка Groq:", err);
+    ctx.reply("❌ Ошибка при запросе к модели.");
+  }
+});
+
+// --------------------------------------------------
+// ВЕРСЕЛЬ WEBHOOK
+// --------------------------------------------------
+export default async function handler(req, res) {
+  if (req.method === "POST") {
+    try {
+      const update = req.body;
+      await bot.handleUpdate(update);
+      return res.status(200).end();
+    } catch (err) {
+      console.error("Ошибка в обработке webhook:", err);
+      return res.status(500).send("Internal Server Error");
+    }
+  }
+
+  return res.status(200).send("OK");
 }
+
+// Настройка webhook
+bot.telegram.setWebhook(WEBHOOK_URL);

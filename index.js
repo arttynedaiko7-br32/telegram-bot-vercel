@@ -78,16 +78,29 @@ async function downloadTelegramFile(ctx, fileId) {
 
 /* ================= PDF ================= */
 async function extractPdfText(buffer) {
-  const pdf = await pdfjs.getDocument({ data: buffer }).promise;
-  let text = '';
+  try {
+    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+    
+    const maxPages = 10;  // Ограничение на количество страниц
+    const pageCount = Math.min(pdf.numPages, maxPages);
+    
+    let text = '';
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim() + '\n';
+    }
 
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map(it => it.str).join(' ') + '\n';
+    if (pdf.numPages > maxPages) {
+      text += `\n...и другие ${pdf.numPages - maxPages} страницы.`;
+    }
+
+    return text;
+
+  } catch (error) {
+    console.error('Ошибка извлечения текста из PDF:', error);
+    throw new Error('Не удалось извлечь текст из PDF.');
   }
-
-  return text;
 }
 
 /* ================= COMMANDS ================= */
@@ -180,7 +193,7 @@ bot.on('text', async ctx => {
     messages.push({
       role: 'system',
       content:
-        `Текст загруженного документа "${chat.documentName}".
+        `Текст загруженного документа "${chat.documentName}". 
 Используй его ТОЛЬКО если это релевантно вопросу:\n\n${docContext}`
     });
   }

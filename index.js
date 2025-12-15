@@ -2,8 +2,6 @@ import { Telegraf } from 'telegraf';
 import axios from 'axios';
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
-import XLSX from 'xlsx';
-import JSZip from 'jszip';
 
 /* ================= ENV ================= */
 const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
@@ -18,18 +16,13 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 
 /* ================= CONFIG ================= */
 const MAX_HISTORY = 50;
-const MAX_DOC_LENGTH = 8000;
+const CHUNK_SIZE = 1200;          // размер одного чанка
+const MAX_CHUNKS_IN_PROMPT = 3;   // максимум чанков за раз
 
 /* ================= SYSTEM PROMPT ================= */
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
-
-Если пользователь загрузил документ:
-- используй его как основной источник
-- не выдумывай факты
-- если информации в документе нет — прямо скажи об этом
-
-Отвечай чётко и по делу.
+Отвечай чётко, по делу, без выдумок.
 `;
 
 /* ================= MEMORY ================= */
@@ -39,11 +32,65 @@ function getChat(chatId) {
   if (!chats.has(chatId)) {
     chats.set(chatId, {
       history: [],
-      documentText: '',
+      documentChunks: [],
       documentName: ''
     });
   }
   return chats.get(chatId);
+}
+
+/* ================= HELPERS ================= */
+function chunkText(text) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE));
+  }
+  return chunks;
+}
+
+function findRelevantChunks(chunks, query) {
+  const words = query
+    .toLowerCase()
+    .split(/\W+/)
+    .filter(w => w.length > 3);
+
+  if (!words.length) return [];
+
+  return chunks.filter(chunk => {
+    const lc = chunk.toLowerCase();
+    return words.some(w => lc.includes(w));
+  });
+}
+
+function pickChunks(chunks, question) {
+  if (!chunks.length) return [];
+
+  const relevant = findRelevantChunks(chunks, question);
+
+  if (relevant.length) {
+    return relevant.slice(0, MAX_CHUNKS_IN_PROMPT);
+  }
+
+  // fallback: начало + середина + конец
+  const middle = Math.floor(chunks.length / 2);
+
+  return [
+    chunks[0],
+    chunks[middle],
+    chunks[chunks.length - 1]
+  ]
+    .filter(Boolean)
+    .slice(0, MAX_CHUNKS_IN_PROMPT);
+}
+
+function normalizeHistory(history) {
+  const clean = [];
+  for (const msg of history) {
+    if (!clean.length || clean[clean.length - 1].role !== msg.role) {
+      clean.push(msg);
+    }
+  }
+  return clean;
 }
 
 /* ================= FILE DOWNLOAD ================= */
@@ -61,7 +108,7 @@ async function downloadTelegramFile(ctx, fileId) {
 
 /* ================= COMMANDS ================= */
 bot.start(ctx => {
-  ctx.reply('Инженерный AI-ассистент. Задай вопрос или загрузи файл.');
+  ctx.reply('Инженерный AI-ассистент. Задай вопрос или загрузи DOCX файл.');
 });
 
 bot.command('reset', ctx => {
@@ -69,7 +116,7 @@ bot.command('reset', ctx => {
   ctx.reply('Контекст очищен.');
 });
 
-/* ================= DOCUMENT ================= */
+/* ================= DOCUMENT (DOCX ONLY) ================= */
 bot.on('document', async ctx => {
   const chat = getChat(ctx.chat.id);
   const file = ctx.message.document;
@@ -77,49 +124,27 @@ bot.on('document', async ctx => {
   await ctx.reply('Файл получен, обрабатываю…');
 
   try {
-    const buffer = await downloadTelegramFile(ctx, file.file_id);
     const name = file.file_name || '';
-    let text = '';
 
-    if (/\.docx$/i.test(name)) {
-      const r = await mammoth.extractRawText({ buffer });
-      text = r.value || '';
-
-    } else if (/\.xlsx$/i.test(name)) {
-      const wb = XLSX.read(buffer, { type: 'array' });
-      text = wb.SheetNames
-        .map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s]))
-        .join('\n');
-
-    } else if (/\.csv$|\.txt$/i.test(name)) {
-      text = buffer.toString('utf8');
-
-    } else if (/\.pptx$/i.test(name)) {
-      const zip = await JSZip.loadAsync(buffer);
-      for (const f of Object.keys(zip.files).filter(f => f.includes('slide'))) {
-        const xml = await zip.files[f].async('string');
-        (xml.match(/<a:t>(.*?)<\/a:t>/g) || []).forEach(t => {
-          text += t.replace(/<[^>]+>/g, '') + ' ';
-        });
-      }
-
-    } else {
-      return ctx.reply('Формат файла не поддерживается.');
+    if (!/\.docx$/i.test(name)) {
+      return ctx.reply('Поддерживаются только файлы .docx');
     }
+
+    const buffer = await downloadTelegramFile(ctx, file.file_id);
+    const result = await mammoth.extractRawText({ buffer });
+    const text = result.value || '';
 
     if (!text.trim()) {
       return ctx.reply('Не удалось извлечь текст из файла.');
     }
 
-    if (text.length > MAX_DOC_LENGTH) {
-      text = text.slice(0, MAX_DOC_LENGTH) + '\n\n[Документ обрезан]';
-    }
-
     chat.documentName = name;
-    chat.documentText = text;
+    chat.documentChunks = chunkText(text);
     chat.history = [];
 
-    ctx.reply(`Готово ✅\nФайл: ${name}`);
+    ctx.reply(
+      `Готово ✅\nФайл: ${name}\nЧанков: ${chat.documentChunks.length}`
+    );
   } catch (e) {
     console.error('Document error:', e);
     ctx.reply('Ошибка обработки файла.');
@@ -132,28 +157,31 @@ bot.on('text', async ctx => {
   const question = ctx.message.text.trim();
   if (!question) return;
 
-  const messages = [
-    { role: 'system', content: SYSTEM_PROMPT }
-  ];
+  const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
 
-  if (chat.documentText) {
-    messages.push({
-      role: 'user',
-      content: `
-Ниже приведён текст документа "${chat.documentName}".
-Используй его как источник информации.
+  // 👉 добавляем ТОЛЬКО нужные чанки
+  if (chat.documentChunks.length) {
+    const chunksForPrompt = pickChunks(
+      chat.documentChunks,
+      question
+    );
 
-=== ДОКУМЕНТ ===
-${chat.documentText}
-=== КОНЕЦ ДОКУМЕНТА ===
-`
-    });
+    for (const chunk of chunksForPrompt) {
+      messages.push({
+        role: 'user',
+        content: chunk
+      });
+    }
   }
 
   messages.push(
-    ...chat.history,
-    { role: 'user', content: question }
+    ...normalizeHistory(chat.history).slice(-MAX_HISTORY)
   );
+
+  messages.push({
+    role: 'user',
+    content: question
+  });
 
   try {
     const res = await groq.chat.completions.create({

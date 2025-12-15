@@ -1,119 +1,102 @@
 import { Telegraf } from 'telegraf';
 import Groq from 'groq-sdk';
 
-/* ================= ENV ================= */
+/* ========= ENV ========= */
 const { GROQ_API_KEY, TELEGRAM_TOKEN } = process.env;
-
 if (!GROQ_API_KEY || !TELEGRAM_TOKEN) {
   throw new Error('Missing environment variables');
 }
 
-/* ================= INIT ================= */
+/* ========= INIT ========= */
 const bot = new Telegraf(TELEGRAM_TOKEN);
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-/* ================= CONFIG ================= */
-const MAX_HISTORY = 50;            // сколько сообщений храним
-const PROMPT_HISTORY_LIMIT = 10;   // сколько отправляем в модель
-const MAX_QUESTION_LENGTH = 3000;
+/* ========= CONFIG ========= */
+const CONFIG = {
+  MAX_HISTORY: 50,
+  PROMPT_HISTORY_LIMIT: 10,
+  MAX_QUESTION_LENGTH: 3000,
+  MODEL: 'mixtral-8x7b-32768',
+  MAX_TOKENS: 500
+};
 
-/* ================= SYSTEM PROMPT ================= */
 const SYSTEM_PROMPT = `
 Ты инженерный AI-ассистент.
-Помогаешь решать инженерные, математические задачи, разбираться в коде и писать его.
-Формулируй ответ четко и понятно, на поставленные вопросы отвечай
-без догадок и выдумок.
-`;
+Помогаешь решать инженерные, математические задачи и писать код.
+Отвечай четко, без догадок и выдумок.
+`.trim();
 
-/* ================= MEMORY ================= */
+/* ========= MEMORY ========= */
 const chats = new Map();
 
-function getChat(chatId) {
-  if (!chats.has(chatId)) {
-    chats.set(chatId, {
-      history: []
-    });
-  }
+const getChat = chatId => {
+  if (!chats.has(chatId)) chats.set(chatId, { history: [] });
   return chats.get(chatId);
-}
+};
 
-/* ================= COMMANDS ================= */
-bot.start(ctx => {
-  ctx.reply('Привет! Я инженерный AI-ассистент, готов помочь 👋');
-});
+/* ========= COMMANDS ========= */
+bot.start(ctx => ctx.reply('Привет! Я инженерный AI-ассистент 👋'));
 
 bot.command('reset', ctx => {
   chats.delete(ctx.chat.id);
   ctx.reply('Контекст диалога очищен.');
 });
 
-/* ================= TEXT ================= */
+/* ========= TEXT HANDLER ========= */
 bot.on('text', async ctx => {
-  const chat = getChat(ctx.chat.id);
   const question = ctx.message.text?.trim();
-
   if (!question) return;
 
-  if (question.length > MAX_QUESTION_LENGTH) {
+  if (question.length > CONFIG.MAX_QUESTION_LENGTH) {
     return ctx.reply('Сообщение слишком длинное.');
   }
 
-  /* ===== BUILD PROMPT ===== */
+  const chat = getChat(ctx.chat.id);
+
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...chat.history.slice(-PROMPT_HISTORY_LIMIT),
+    ...chat.history.slice(-CONFIG.PROMPT_HISTORY_LIMIT),
     { role: 'user', content: question }
-  ].filter(m => m.content && m.content.trim().length > 0);
-
-  /* ===== DEBUG ===== */
-  console.log(
-    'PROMPT DEBUG:',
-    messages.map(m => ({ role: m.role, length: m.content.length }))
-  );
+  ];
 
   try {
-    const res = await groq.chat.completions.create({
-      model: 'mixtral-8x7b-32768', // стабильная модель
+    const { choices } = await groq.chat.completions.create({
+      model: CONFIG.MODEL,
       messages,
-      max_tokens: 500
+      max_tokens: CONFIG.MAX_TOKENS
     });
 
-    const answer = res?.choices?.[0]?.message?.content;
+    const answer = choices?.[0]?.message?.content;
+    if (!answer) throw new Error('Empty model response');
 
-    if (!answer) {
-      throw new Error('Empty response from model');
-    }
+    chat.history.push(
+      { role: 'user', content: question },
+      { role: 'assistant', content: answer }
+    );
 
-    /* ===== SAVE HISTORY ===== */
-    chat.history.push({ role: 'user', content: question });
-    chat.history.push({ role: 'assistant', content: answer });
-
-    if (chat.history.length > MAX_HISTORY) {
-      chat.history.splice(0, chat.history.length - MAX_HISTORY);
-    }
+    chat.history.splice(
+      0,
+      Math.max(0, chat.history.length - CONFIG.MAX_HISTORY)
+    );
 
     ctx.reply(answer);
 
-  } catch (e) {
-    console.error(
-      'GROQ ERROR FULL:',
-      e?.response?.data || e?.message || e
-    );
+  } catch (err) {
+    console.error('GROQ ERROR:', err?.message || err);
     ctx.reply('Ошибка генерации ответа.');
   }
 });
 
-/* ================= VERCEL HANDLER ================= */
+/* ========= VERCEL HANDLER ========= */
 export default async function handler(req, res) {
   try {
     if (req.method === 'POST') {
       await bot.handleUpdate(req.body);
-      res.status(200).end();
-    } else {
-      res.status(200).send('OK');
+      return res.status(200).end();
     }
-  } catch (e) {
-    console.error('Handler error:', e);
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('Handler error:', err);
     res.status(500).send('Internal error');
   }
 }

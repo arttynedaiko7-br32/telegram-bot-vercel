@@ -124,7 +124,7 @@ bot.on("text", async (ctx) => {
         { role: "system", content: SYSTEM_PROMPT },
         ...memory.get(chatId),
       ],
-      temperature: 0.7,
+      temperature: 0.3,
       max_tokens: 200,
     });
 

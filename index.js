@@ -5,7 +5,6 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import Groq from "groq-sdk";
-import { PDFDocument } from "pdf-lib"; // Импортируем библиотеку pdf-lib
 
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -23,13 +22,12 @@ if (!TELEGRAM_TOKEN) {
 // Инициализация Groq с вашим API ключом
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-// ---------- INIT ----------
+// Инициализация бота
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
 // ---------- MEMORY ----------
 const memory = new Map();
-const MAX_HISTORY = 50;
-const MAX_TEXT_CHARS = 10000;
+const MAX_HISTORY = 50; // Максимальное количество сообщений в истории
 
 const SYSTEM_PROMPT =
   "Ты — интеллектуальный ассистент девушка. Запоминай контекст диалога. Отвечай чётко и по делу.";
@@ -46,14 +44,15 @@ bot.start((ctx) => {
   ctx.reply(
     `👋 Привет, ${ctx.from.first_name || "друг"}!
 
-Я AI-ассистент с памятью.
+Я бот с памятью.
 
 Команды:
 /help — список команд
 /reset — очистить память
-/clear — очистить историю
+/clear — очистить историю чата
 
-Можешь отправлять файлы (txt, md, csv, json, pdf, docx).`
+Можешь отправлять файлы (txt, md, csv, json, pdf, docx).
+Задавай вопросы, и я постараюсь помочь!`
   ).catch(err => console.error("Ошибка при отправке приветственного сообщения:", err));
 });
 
@@ -75,96 +74,9 @@ bot.command("clear", async (ctx) => {
   ctx.reply("История чата очищена!");
 });
 
-// ======================================================
-// ОБРАБОТКА ДОКУМЕНТОВ
-// ======================================================
-bot.on("document", async (ctx) => {
-  const chatId = ctx.chat.id;
-  try {
-    console.log(`Документ получен: ${ctx.message.document?.file_name}`);
-    const doc = ctx.message.document;
-    if (!doc) {
-      console.log("Ошибка: Нет документа в сообщении.");
-      return ctx.reply("Нет документа в сообщении.");
-    }
-
-    const fileId = doc.file_id;
-    const fileName = doc.file_name || "file";
-    const fileUrl = await ctx.telegram.getFileLink(fileId);
-
-    const safeName = fileName.replace(/[/\\?%*:|"<>]/g, "_");
-    const filePath = path.join(tmpDir, safeName);
-
-    console.log("Загрузка файла с URL:", fileUrl.href);
-    const resp = await axios.get(fileUrl.href, {
-      responseType: "arraybuffer",
-      timeout: 120000,
-    });
-
-    const uint8 = new Uint8Array(resp.data);
-    fs.writeFileSync(filePath, Buffer.from(uint8));
-
-    let text = "";
-
-    if (/\.(txt|md|csv)$/i.test(fileName)) {
-      text = Buffer.from(uint8).toString("utf8");
-    } else if (/\.json$/i.test(fileName)) {
-      text = JSON.stringify(JSON.parse(Buffer.from(uint8).toString("utf8")), null, 2);
-    } else if (/\.pdf$/i.test(fileName)) {
-      text = await extractPdfText(uint8); // Используем функцию для извлечения текста из PDF
-    } else if (/\.docx$/i.test(fileName)) {
-      const result = await mammoth.extractRawText({ buffer: Buffer.from(uint8) });
-      text = result.value || "";
-    } else {
-      try { fs.unlinkSync(filePath); } catch {}
-      console.log(`Ошибка: Этот формат файла не поддерживается: ${fileName}`);
-      return ctx.reply("❌ Этот формат файла не поддерживается.");
-    }
-
-    if (text.length > MAX_TEXT_CHARS) {
-      text = text.slice(0, MAX_TEXT_CHARS) + "\n...(обрезано)";
-    }
-
-    if (!memory.has(chatId)) memory.set(chatId, []);
-    memory.get(chatId).push({
-      role: "user",
-      content: `📄 Файл ${fileName} загружен:\n${text}`,
-    });
-
-    try { fs.unlinkSync(filePath); } catch {}
-
-    ctx.reply("📄 Файл загружен и добавлен в контекст!");
-  } catch (err) {
-    console.error("Ошибка обработки файла:", err);
-    ctx.reply("❌ Ошибка при обработке файла.");
-  }
-});
-
-// ======================================================
-// Функция для извлечения текста из PDF с использованием pdf-lib
-// ======================================================
-const extractPdfText = async (pdfData) => {
-  try {
-    const pdfDoc = await PDFDocument.load(pdfData);  // Загружаем PDF
-    const pages = pdfDoc.getPages();  // Получаем страницы PDF
-    let text = "";
-
-    // Для каждой страницы извлекаем текст
-    pages.forEach((page) => {
-      const textContent = page.getTextContent();
-      text += textContent.items.map(item => item.str).join(" ");
-    });
-
-    return text;
-  } catch (error) {
-    console.error("Ошибка при извлечении текста из PDF:", error);
-    return "Не удалось извлечь текст из PDF.";
-  }
-};
-
-// ======================================================
-// ОБРАБОТКА ТЕКСТА
-// ======================================================
+// --------------------------------------------------
+// ОБРАБОТКА ТЕКСТА (вопросы к модели)
+// --------------------------------------------------
 bot.on("text", async (ctx) => {
   const chatId = ctx.chat.id;
   const msg = ctx.message.text;
@@ -174,42 +86,50 @@ bot.on("text", async (ctx) => {
     memory.set(chatId, []);
   }
 
+  // Добавляем новое сообщение пользователя в память
   memory.get(chatId).push({ role: "user", content: msg });
 
+  // Если количество сообщений в памяти превышает MAX_HISTORY, удаляем старые записи
   if (memory.get(chatId).length > MAX_HISTORY) {
-    console.log(`Очищаем историю чата: ${chatId}`);
-    memory.set(chatId, memory.get(chatId).slice(-MAX_HISTORY));
-  }
-
-  try { 
-    await ctx.sendChatAction("typing"); 
-  } catch (err) {
-    console.error("Ошибка при отправке действия typing:", err);
+    console.log(`Память переполнена для чата ${chatId}. Удаляем старые сообщения.`);
+    memory.get(chatId).shift(); // Удаляем самое старое сообщение
   }
 
   try {
+    // Запрос к модели
     const response = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...memory.get(chatId),
       ],
-      temperature: 0.2,
-      max_tokens: 800,
+      temperature: 0.7,
+      max_tokens: 200,
     });
 
     console.log("Ответ от модели:", response);
     const answer = response?.choices?.[0]?.message?.content;
 
+    // Добавляем ответ модели в память
     if (answer) {
       memory.get(chatId).push({ role: "assistant", content: answer });
     }
 
+    // Отправляем ответ пользователю
     ctx.reply(answer || "Модель вернула пустой ответ.");
   } catch (err) {
-    console.error("Ошибка Groq:", err);
+    console.error("Ошибка при запросе к модели:", err);
     ctx.reply("❌ Ошибка при запросе к модели.");
   }
+});
+
+// --------------------------------------------------
+// СБРОС ПАМЯТИ
+// --------------------------------------------------
+bot.command("reset", (ctx) => {
+  const chatId = ctx.chat.id;
+  memory.delete(chatId);
+  ctx.reply("Память очищена!");
 });
 
 // --------------------------------------------------

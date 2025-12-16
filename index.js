@@ -38,6 +38,11 @@ const SYSTEM_PROMPT =
 const tmpDir = path.join(os.tmpdir(), "tg_ai_files");
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
+
+if(!tmpDir)
+{
+  
+}
 // --------------------------------------------------
 // START / HELP
 // --------------------------------------------------

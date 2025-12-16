@@ -27,7 +27,8 @@ const bot = new Telegraf(TELEGRAM_TOKEN);
 
 // ---------- MEMORY ----------
 const memory = new Map();
-const MAX_HISTORY = 50; // Максимальное количество сообщений в истории
+const MAX_HISTORY = 20; // Максимальное количество сообщений в истории
+const botMessages = new Map(); // Сохранение ID сообщений, отправленных ботом
 
 const SYSTEM_PROMPT =
   "Ты — интеллектуальный ассистент девушка. Запоминай контекст диалога. Отвечай чётко и по делу.";
@@ -68,10 +69,30 @@ bot.command("help", (ctx) => {
 });
 
 bot.command("clear", async (ctx) => {
-  console.log("Команда /clear вызвана");
   const chatId = ctx.chat.id;
-  memory.delete(chatId);
-  ctx.reply("История чата очищена!");
+
+  // Удаление всех сообщений, отправленных ботом в этом чате
+  if (botMessages.has(chatId)) {
+    const messageIds = botMessages.get(chatId);
+    for (const messageId of messageIds) {
+      try {
+        await ctx.telegram.deleteMessage(chatId, messageId);
+        console.log(`Удалено сообщение с ID: ${messageId}`);
+      } catch (err) {
+        console.error("Ошибка при удалении сообщения:", err);
+      }
+    }
+    // Очищаем сохранённые ID сообщений
+    botMessages.delete(chatId);
+  }
+
+  // Очищаем память
+  if (memory.has(chatId)) {
+    memory.delete(chatId);
+    console.log(`История чата для ${chatId} очищена.`);
+  }
+
+  ctx.reply("История чата и сообщения удалены!");
 });
 
 // --------------------------------------------------
@@ -115,8 +136,15 @@ bot.on("text", async (ctx) => {
       memory.get(chatId).push({ role: "assistant", content: answer });
     }
 
-    // Отправляем ответ пользователю
-    ctx.reply(answer || "Модель вернула пустой ответ.");
+    // Отправляем ответ пользователю и сохраняем ID сообщения
+    const sentMessage = await ctx.reply(answer || "Модель вернула пустой ответ.");
+    
+    // Сохраняем ID сообщения, чтобы удалить его позже при /clear
+    if (!botMessages.has(chatId)) {
+      botMessages.set(chatId, []);
+    }
+    botMessages.get(chatId).push(sentMessage.message_id);
+
   } catch (err) {
     console.error("Ошибка при запросе к модели:", err);
     ctx.reply("❌ Ошибка при запросе к модели.");

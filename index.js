@@ -251,7 +251,7 @@ if (!pdfText.trim()) {
   }
 
   ctx.reply('getAnswerFromModelPDF');
-    console.log('Сообщения, передаваемые модели:', messages);  // Логируем сообщения перед их отправкой
+    console.log('Сообщения, передаваемые модели:232323');  // Логируем сообщения перед их отправкой
 
   try {
     const relevantText = getRelevantTextForQuestion(question);
@@ -263,7 +263,7 @@ ctx.reply('getAnswerFromModelPDF1');
     // Передаем контекст и релевантный текст в модель
     const response =await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      messages: [
+     messages: [
           { role: 'system', content: 'Ты ассистент, который помогает отвечать на вопросы по содержимому PDF.' },
           { role: 'user', content: question },
           { role: 'assistant', content: relevantText },  // Передаем только релевантный текст

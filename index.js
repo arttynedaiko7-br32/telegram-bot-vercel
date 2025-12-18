@@ -89,15 +89,33 @@ async function extractTextFromPDF(fileBuffer) {
 
 // Функция для поиска подходящей части текста
 function getRelevantTextForQuestion(question) {
+  
+  const generalQuestions = ["о чем файл?", "что в файле?", "кратко о файле?"];
   const textChunks = pdfText.split('\n\n'); // Разделяем текст на абзацы
   let relevantText = '';
+//Приводим вопрос к нижнему регистру для простоты проверки
+  const questionLower = question.toLowerCase();
 
-  // Поиск подходящего абзаца, который соответствует вопросу
+  if (generalQuestions.some(q => questionLower.includes(q))) {
+    // Если это общий вопрос, просто возвращаем первые несколько абзацев
+    const overview = textChunks.slice(0, 3).join('\n\n'); // Берем первые 3 абзаца
+    return `Краткий обзор файла: \n\n${overview || 'Текст файла слишком короткий для анализа.'}`;
+  }
+
+  // Поиск подходящего абзаца, который может содержать ключевые слова или фразы из вопроса
   textChunks.forEach(chunk => {
-    if (chunk.toLowerCase().includes(question.toLowerCase())) {
+    // Используем регулярные выражения для поиска ключевых фраз
+    const regex = new RegExp(questionLower.split(' ').join('|'), 'i');  // Ищем все слова из вопроса
+    if (regex.test(chunk.toLowerCase())) {
       relevantText += chunk + '\n\n'; // Добавляем в ответ
     }
   });
+
+  // Если релевантный текст не найден, можно использовать другой способ (например, первые несколько абзацев)
+  if (!relevantText) {
+    relevantText = pdfText.slice(0, 1000);  // Берем первые 1000 символов текста как fallback
+    return `Не удалось найти подходящий текст. Вот часть содержимого файла: \n\n${relevantText}`;
+  }
 
   return relevantText || 'Извините, я не нашел подходящей информации.';
 }
@@ -252,7 +270,7 @@ ctx.reply('getAnswerFromModelPDF1');
           ...conversationHistory,  // История сообщений
       ],
       temperature: 0.3,
-      max_tokens: 2048,
+      max_tokens: 1000,
     });
 ctx.reply('getAnswerFromModelPDF2');
     // Добавляем ответ в историю для сохранения контекста

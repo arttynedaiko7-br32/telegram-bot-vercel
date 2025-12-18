@@ -59,6 +59,7 @@ bot.on('document', async (ctx) => {
     // Извлекаем текст из PDF
     const text = await extractTextFromPDF(buffer);
     if (text) {
+      orderStatus = StatusContext.PDF
       pdfText = text;
       console.log('Текст из PDF успешно извлечен:', pdfText.slice(0, 200));  // Логируем первые 200 символов извлеченного текста
       ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
@@ -140,6 +141,7 @@ bot.command("reset", (ctx) => {
   pdfText = "";  // Очищаем текст PDF
   conversationHistory = [];  // Очищаем историю сообщений
   ctx.reply("Контекст был сброшен!");
+  orderStatus = StatusContext.TEXT
 });
 
 bot.command("clear", async (ctx) => {
@@ -266,7 +268,7 @@ bot.on("text", async (ctx) => {
     return;
   }
 */
-  orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
+  //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
   
   switch (orderStatus) {
     case StatusContext.TEXT:

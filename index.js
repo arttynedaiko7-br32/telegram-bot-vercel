@@ -48,26 +48,20 @@ bot.on('document', async (ctx) => {
   const fileId = ctx.message.document.file_id;
   try {
     const fileLink = await ctx.telegram.getFileLink(fileId);
-    console.log('Получена ссылка на файл:', fileLink); // Логируем полученную ссылку
-
     // Скачиваем файл с использованием axios
     const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
-    console.log('Файл успешно скачан, размер:', response.data.length); // Логируем размер файла
-
     const buffer = Buffer.from(response.data);
 
     // Извлекаем текст из PDF
     const text = await extractTextFromPDF(buffer);
     if (text) {
-     // orderStatus = StatusContext.PDF
       pdfText = text;
-      console.log('Текст из PDF успешно извлечен:', pdfText.slice(0, 200));  // Логируем первые 200 символов извлеченного текста
+      orderStatus = StatusContext.PDF
       ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
     } else {
       ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
     }
   } catch (error) {
-    console.error('Ошибка при скачивании или обработке файла:', error);
     ctx.reply('Произошла ошибка при скачивании файла. Попробуйте позже.');
   }
 });
@@ -76,12 +70,9 @@ bot.on('document', async (ctx) => {
 // Функция для извлечения текста из PDF
 async function extractTextFromPDF(fileBuffer) {
   try {
-    console.log('Начинаю парсинг PDF. Данные размера:', fileBuffer.length);  // Логируем размер буфера
     const data = await pdfParse(fileBuffer);
-    console.log('Парсинг PDF завершен, извлечено текста:', data.text.slice(0, 200)); // Логируем первые 200 символов текста
     return data.text; // возвращает весь текст из PDF
   } catch (error) {
-    console.error('Ошибка при парсинге PDF:', error);
     return null;
   }
 }
@@ -93,7 +84,7 @@ function getRelevantTextForQuestion(question) {
   const generalQuestions = ["о чем файл?", "что в файле?", "кратко о файле?"];
   const textChunks = pdfText.split('\n\n'); // Разделяем текст на абзацы
   let relevantText = '';
-//Приводим вопрос к нижнему регистру для простоты проверки
+  //Приводим вопрос к нижнему регистру для простоты проверки
   const questionLower = question.toLowerCase();
 
   if (generalQuestions.some(q => questionLower.includes(q))) {
@@ -244,19 +235,10 @@ async function getAnswerFromModelText(ctx,question)
 }
 
 // Функция для получения ответа от модели
-async function getAnswerFromModelPDF(ctx,question) {
-if (!pdfText.trim()) {
-    console.log('Ошибка: нет текста из PDF');
-    return 'Не удалось извлечь текст из PDF. Попробуйте другой файл.';
-  }
-
-  ctx.reply('getAnswerFromModelPDF');
-    console.log('Сообщения, передаваемые модели:232323');  // Логируем сообщения перед их отправкой
+async function getAnswerFromModelPDF(question) {
 
   try {
     const relevantText = getRelevantTextForQuestion(question);
-ctx.reply('getAnswerFromModelPDF1');
-     console.log('Релевантный текст для вопроса:', relevantText); // Для отладки
     // Добавляем вопрос и релевантный текст в историю беседы
     conversationHistory.push({ role: 'user', content: question });
 
@@ -272,13 +254,12 @@ ctx.reply('getAnswerFromModelPDF1');
       temperature: 0.3,
       max_tokens: 1000,
     });
-ctx.reply('getAnswerFromModelPDF2');
     // Добавляем ответ в историю для сохранения контекста
     const answer = response.choices[0].message.content;
     conversationHistory.push({ role: 'assistant', content: answer });
     return answer;
   } catch (error) {
-    console.error('Ошибка при запросе к OpenAI:', error);
+    console.error('Ошибка при запросе к llama-3.3-70b-versatile:', error);
     return 'Извините, произошла ошибка при обработке вашего запроса.';
   }
 }
@@ -287,31 +268,26 @@ ctx.reply('getAnswerFromModelPDF2');
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
 bot.on("text", async (ctx) => {
-  /*
-  if (orderStatus === StatusContext.PDF && !pdfText) {
-      ctx.reply('PDF не был обработан корректно. Попробуйте загрузить файл снова.');
-      return;
-    }
-*/
- 
-    ctx.reply('Обработчик текста');
-
+  
     //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
 
-  //switch (orderStatus) {
-    //case StatusContext.TEXT:
-    //  const userQuestion = ctx.message.text;  
-    //  await getAnswerFromModelText(ctx,userQuestion);
-     // break;
-    //case StatusContext.PDF:
-     
+  switch (orderStatus) {
+    case StatusContext.TEXT:
+      const userQuestion = ctx.message.text;  
+      await getAnswerFromModelText(ctx,userQuestion);
+      break;
+    case StatusContext.PDF:
+      if (!pdfText.trim()) {
+           console.log('Ошибка: нет текста из PDF');
+           return 'Не удалось извлечь текст из PDF. Попробуйте другой файл.';
+         }
       const question = ctx.message.text;
-      const answer = await getAnswerFromModelPDF(ctx,question);
+      const answer = await getAnswerFromModelPDF(question);
       ctx.reply(answer);
-    //break
-    //default:
-     // break;
-  //}
+    break
+    default:
+      break;
+  }
   
 });
 

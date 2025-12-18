@@ -59,7 +59,7 @@ bot.on('document', async (ctx) => {
     // Извлекаем текст из PDF
     const text = await extractTextFromPDF(buffer);
     if (text) {
-      orderStatus = StatusContext.PDF
+     // orderStatus = StatusContext.PDF
       pdfText = text;
       console.log('Текст из PDF успешно извлечен:', pdfText.slice(0, 200));  // Логируем первые 200 символов извлеченного текста
       ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
@@ -261,36 +261,33 @@ async function getAnswerFromModelPDF(question) {
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
 bot.on("text", async (ctx) => {
+  /*
   if (orderStatus === StatusContext.PDF && !pdfText) {
       ctx.reply('PDF не был обработан корректно. Попробуйте загрузить файл снова.');
       return;
     }
-
-  /*  
-  if (!pdfText) {
-    ctx.reply('Пожалуйста, отправьте PDF файл для обработки.');//проверка
-    return;
-  }
 */
-  //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
-  
-  switch (orderStatus) {
-    case StatusContext.TEXT:
-      const userQuestion = ctx.message.text;  
-      await getAnswerFromModelText(ctx,userQuestion);
-      break;
-    case StatusContext.PDF:
-      if (!pdfText.trim()) {
+ if (!pdfText.trim()) {
       ctx.reply('Не удалось извлечь текст из PDF. Попробуйте другой файл.');
      return;
     }
+
+    //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
+
+  //switch (orderStatus) {
+    //case StatusContext.TEXT:
+    //  const userQuestion = ctx.message.text;  
+    //  await getAnswerFromModelText(ctx,userQuestion);
+     // break;
+    //case StatusContext.PDF:
+     
       const question = ctx.message.text;
       const answer = await getAnswerFromModelPDF(question);
       ctx.reply(answer);
-    break
-    default:
-      break;
-  }
+    //break
+    //default:
+     // break;
+  //}
   
 });
 

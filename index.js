@@ -1,10 +1,15 @@
 import "dotenv/config";
 import { Telegraf } from "telegraf";
-import axios from "axios";
-import fs from "fs";
-import path from "path";
-import os from "os";
 import Groq from "groq-sdk";
+const pdfParse = require('pdf-parse');
+const axios = require('axios');
+
+
+const StatusContext = Object.freeze({
+  TEXT: 0,
+  PDF:1
+});
+let orderStatus = StatusContext.TEXT;
 
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -25,17 +30,64 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 // Инициализация бота
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
+
 // ---------- MEMORY ----------
 const memory = new Map();
 const MAX_HISTORY = 20; // Максимальное количество сообщений в истории
 const botMessages = new Map(); // Сохранение ID сообщений, отправленных ботом
 
+// ---------- CONTEXT PDF ----------
+let pdfText = "";
+let conversationHistory = [];
+
+
 const SYSTEM_PROMPT =
   "Ты — интеллектуальный ассистент девушка. Запоминай контекст диалога. Отвечай чётко и по делу.";
 
-// ---------- TMP DIR ----------
-const tmpDir = path.join(os.tmpdir(), "tg_ai_files");
-if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+// ОБРАБОТКА ПОЛУЧЕНИЯ ДОКУМЕНТА
+bot.on('document', async (ctx) => {
+  const fileId = ctx.message.document.file_id;
+  const fileLink = await ctx.telegram.getFileLink(fileId);
+
+  // Скачиваем PDF
+  const response = await fetch(fileLink);
+  const buffer = await response.buffer();
+
+  // Извлекаем текст из PDF
+  const text = await extractTextFromPDF(buffer);
+  if (text) {
+    pdfText = text;
+    ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
+  } else {
+    ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
+  }
+});
+
+// Функция для извлечения текста из PDF
+async function extractTextFromPDF(fileBuffer) {
+  try {
+    const data = await pdfParse(fileBuffer);
+    return data.text; // возвращает весь текст из PDF
+  } catch (error) {
+    console.error('Ошибка при парсинге PDF:', error);
+    return null;
+  }
+}
+
+// Функция для поиска подходящей части текста
+function getRelevantTextForQuestion(question) {
+  const textChunks = pdfText.split('\n\n'); // Разделяем текст на абзацы
+  let relevantText = '';
+
+  // Поиск подходящего абзаца, который соответствует вопросу
+  textChunks.forEach(chunk => {
+    if (chunk.toLowerCase().includes(question.toLowerCase())) {
+      relevantText += chunk + '\n\n'; // Добавляем в ответ
+    }
+  });
+
+  return relevantText || 'Извините, я не нашел подходящей информации.';
+}
 
 // --------------------------------------------------
 // START / HELP
@@ -43,16 +95,13 @@ if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 bot.start((ctx) => {
   console.log("Бот запущен. Приветственное сообщение отправлено.");
   ctx.reply(
-    `👋 Привет, ${ctx.from.first_name || "друг"}!
-
-Я бот с памятью.
+`👋 Привет, ${ctx.from.first_name || "друг"}!
 
 Команды:
 /help — список команд
 /reset — очистить память
 /clear — очистить историю чата
 
-Можешь отправлять файлы (txt, md, csv, json, pdf, docx).
 Задавай вопросы, и я постараюсь помочь!`
   ).catch(err => console.error("Ошибка при отправке приветственного сообщения:", err));
 });
@@ -66,6 +115,19 @@ bot.command("help", (ctx) => {
       "/reset — сбросить память\n" +
       "/clear — очистить историю чата\n"
   );
+});
+/////
+
+
+// --------------------------------------------------
+// СБРОС ПАМЯТИ
+// --------------------------------------------------
+bot.command("reset", (ctx) => {
+  const chatId = ctx.chat.id;
+  memory.delete(chatId);
+  pdfText = "";  // Очищаем текст PDF
+  conversationHistory = [];  // Очищаем историю сообщений
+  ctx.reply("Контекст был сброшен!");
 });
 
 bot.command("clear", async (ctx) => {
@@ -91,17 +153,15 @@ bot.command("clear", async (ctx) => {
     memory.delete(chatId);
     console.log(`История чата для ${chatId} очищена.`);
   }
-
+  conversationHistory = [];
   ctx.reply("История чата и сообщения удалены!");
 });
-
-// --------------------------------------------------
-// ОБРАБОТКА ТЕКСТА (вопросы к модели)
-// --------------------------------------------------
-bot.on("text", async (ctx) => {
+// Функция для получения ответа от модели в контексте простого общения
+async function getAnswerFromModelText(question)
+{
   const chatId = ctx.chat.id;
   const msg = ctx.message.text;
-
+  
   if (!memory.has(chatId)) {
     console.log(`Создание новой истории для чата: ${chatId}`);
     memory.set(chatId, []);
@@ -149,15 +209,65 @@ bot.on("text", async (ctx) => {
     console.error("Ошибка при запросе к модели:", err);
     ctx.reply("❌ Ошибка при запросе к модели.");
   }
-});
+}
+
+// Функция для получения ответа от модели
+async function getAnswerFromModelPDF(question) {
+  try {
+    const relevantText = getRelevantTextForQuestion(question);
+
+    // Добавляем вопрос и релевантный текст в историю беседы
+    conversationHistory.push({ role: 'user', content: question });
+
+    // Передаем контекст и релевантный текст в модель
+    const response =await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+          { role: 'system', content: 'Ты ассистент, который помогает отвечать на вопросы по содержимому PDF.' },
+          { role: 'user', content: question },
+          { role: 'assistant', content: relevantText },  // Передаем только релевантный текст
+          ...conversationHistory,  // История сообщений
+      ],
+      temperature: 0.3,
+      max_tokens: 2048,
+    });
+
+    // Добавляем ответ в историю для сохранения контекста
+    const answer = response.choices[0].message.content;
+    conversationHistory.push({ role: 'assistant', content: answer });
+    return answer;
+  } catch (error) {
+    console.error('Ошибка при запросе к OpenAI:', error);
+    return 'Извините, произошла ошибка при обработке вашего запроса.';
+  }
+}
 
 // --------------------------------------------------
-// СБРОС ПАМЯТИ
+// ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
-bot.command("reset", (ctx) => {
-  const chatId = ctx.chat.id;
-  memory.delete(chatId);
-  ctx.reply("Память очищена!");
+bot.on("text", async (ctx) => {
+  
+  if (!pdfText) {
+    ctx.reply('Пожалуйста, отправьте PDF файл для обработки.');//проверка
+    return;
+  }
+
+  orderStatus = (pdfText == 0 ) ? StatusContext.TEXT : StatusContext.PDF
+  
+  switch (orderStatus) {
+    case StatusContext.TEXT:
+      //ctx.message.text;
+      await getAnswerFromModelText();
+      break;
+    case StatusContext.PDF:
+      const question = ctx.message.text;
+      const answer = await getAnswerFromModel(question);
+      ctx.reply(answer);
+    break
+    default:
+      break;
+  }
+  
 });
 
 // --------------------------------------------------

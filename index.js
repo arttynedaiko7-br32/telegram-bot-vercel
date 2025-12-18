@@ -48,19 +48,25 @@ bot.on('document', async (ctx) => {
   const fileId = ctx.message.document.file_id;
   const fileLink = await ctx.telegram.getFileLink(fileId);
 
-  // Скачиваем PDF
-  const response = await fetch(fileLink);
-  const buffer = await response.buffer();
+  try {
+    // Скачиваем PDF через axios
+    const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data);
 
-  // Извлекаем текст из PDF
-  const text = await extractTextFromPDF(buffer);
-  if (text) {
-    pdfText = text;
-    ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
-  } else {
-    ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
+    // Извлекаем текст из PDF
+    const text = await extractTextFromPDF(buffer);
+    if (text) {
+      pdfText = text;
+      ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
+    } else {
+      ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
+    }
+  } catch (error) {
+    console.error('Ошибка при скачивании PDF:', error);
+    ctx.reply('Произошла ошибка при скачивании файла. Попробуйте позже.');
   }
 });
+
 
 // Функция для извлечения текста из PDF
 async function extractTextFromPDF(fileBuffer) {

@@ -1,9 +1,8 @@
 import "dotenv/config";
 import { Telegraf } from "telegraf";
 import Groq from "groq-sdk";
-const pdfParse = require('pdf-parse');
-const axios = require('axios');
-
+import axios from 'axios'; 
+import pdfParse from 'pdf-parse';  
 
 const StatusContext = Object.freeze({
   TEXT: 0,

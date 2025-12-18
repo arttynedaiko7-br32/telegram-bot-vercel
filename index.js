@@ -165,7 +165,7 @@ bot.command("clear", async (ctx) => {
 async function getAnswerFromModelText(question)
 {
   const chatId = ctx.chat.id;
-  const msg = ctx.message.text;
+  const msg = question;
   
   if (!memory.has(chatId)) {
     console.log(`Создание новой истории для чата: ${chatId}`);
@@ -261,8 +261,8 @@ bot.on("text", async (ctx) => {
   
   switch (orderStatus) {
     case StatusContext.TEXT:
-      //ctx.message.text;
-      await getAnswerFromModelText();
+      const userQuestion = ctx.message.text;  
+      await getAnswerFromModelText(userQuestion);
       break;
     case StatusContext.PDF:
       const question = ctx.message.text;

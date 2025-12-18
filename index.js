@@ -226,10 +226,18 @@ async function getAnswerFromModelText(ctx,question)
 }
 
 // Функция для получения ответа от модели
-async function getAnswerFromModelPDF(question) {
+async function getAnswerFromModelPDF(ctx,question) {
+if (!pdfText.trim()) {
+    console.log('Ошибка: нет текста из PDF');
+    return 'Не удалось извлечь текст из PDF. Попробуйте другой файл.';
+  }
+
+  ctx.reply('getAnswerFromModelPDF');
+    console.log('Сообщения, передаваемые модели:', messages);  // Логируем сообщения перед их отправкой
+
   try {
     const relevantText = getRelevantTextForQuestion(question);
-
+ctx.reply('getAnswerFromModelPDF1');
      console.log('Релевантный текст для вопроса:', relevantText); // Для отладки
     // Добавляем вопрос и релевантный текст в историю беседы
     conversationHistory.push({ role: 'user', content: question });
@@ -246,7 +254,7 @@ async function getAnswerFromModelPDF(question) {
       temperature: 0.3,
       max_tokens: 2048,
     });
-
+ctx.reply('getAnswerFromModelPDF2');
     // Добавляем ответ в историю для сохранения контекста
     const answer = response.choices[0].message.content;
     conversationHistory.push({ role: 'assistant', content: answer });
@@ -267,10 +275,8 @@ bot.on("text", async (ctx) => {
       return;
     }
 */
- if (!pdfText.trim()) {
-      ctx.reply('Не удалось извлечь текст из PDF. Попробуйте другой файл.');
-     return;
-    }
+ 
+    ctx.reply('Обработчик текста');
 
     //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
 
@@ -282,7 +288,7 @@ bot.on("text", async (ctx) => {
     //case StatusContext.PDF:
      
       const question = ctx.message.text;
-      const answer = await getAnswerFromModelPDF(question);
+      const answer = await getAnswerFromModelPDF(ctx,question);
       ctx.reply(answer);
     //break
     //default:

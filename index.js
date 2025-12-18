@@ -46,23 +46,27 @@ const SYSTEM_PROMPT =
 // ОБРАБОТКА ПОЛУЧЕНИЯ ДОКУМЕНТА
 bot.on('document', async (ctx) => {
   const fileId = ctx.message.document.file_id;
-  const fileLink = await ctx.telegram.getFileLink(fileId);
-
   try {
-    // Скачиваем PDF через axios
+    const fileLink = await ctx.telegram.getFileLink(fileId);
+    console.log('Получена ссылка на файл:', fileLink); // Логируем полученную ссылку
+
+    // Скачиваем файл с использованием axios
     const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
+    console.log('Файл успешно скачан, размер:', response.data.length); // Логируем размер файла
+
     const buffer = Buffer.from(response.data);
 
     // Извлекаем текст из PDF
     const text = await extractTextFromPDF(buffer);
     if (text) {
       pdfText = text;
+      console.log('Текст из PDF успешно извлечен:', pdfText.slice(0, 200));  // Логируем первые 200 символов извлеченного текста
       ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
     } else {
       ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
     }
   } catch (error) {
-    console.error('Ошибка при скачивании PDF:', error);
+    console.error('Ошибка при скачивании или обработке файла:', error);
     ctx.reply('Произошла ошибка при скачивании файла. Попробуйте позже.');
   }
 });
@@ -71,13 +75,16 @@ bot.on('document', async (ctx) => {
 // Функция для извлечения текста из PDF
 async function extractTextFromPDF(fileBuffer) {
   try {
+    console.log('Начинаю парсинг PDF. Данные размера:', fileBuffer.length);  // Логируем размер буфера
     const data = await pdfParse(fileBuffer);
+    console.log('Парсинг PDF завершен, извлечено текста:', data.text.slice(0, 200)); // Логируем первые 200 символов текста
     return data.text; // возвращает весь текст из PDF
   } catch (error) {
     console.error('Ошибка при парсинге PDF:', error);
     return null;
   }
 }
+
 
 // Функция для поиска подходящей части текста
 function getRelevantTextForQuestion(question) {

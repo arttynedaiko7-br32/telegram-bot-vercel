@@ -162,7 +162,7 @@ bot.command("clear", async (ctx) => {
   ctx.reply("История чата и сообщения удалены!");
 });
 // Функция для получения ответа от модели в контексте простого общения
-async function getAnswerFromModelText(question)
+async function getAnswerFromModelText(ctx,question)
 {
   const chatId = ctx.chat.id;
   const msg = question;
@@ -251,22 +251,23 @@ async function getAnswerFromModelPDF(question) {
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
 bot.on("text", async (ctx) => {
-  
+
+  /*  
   if (!pdfText) {
     ctx.reply('Пожалуйста, отправьте PDF файл для обработки.');//проверка
     return;
   }
-
-  orderStatus = (pdfText == 0 ) ? StatusContext.TEXT : StatusContext.PDF
+*/
+  orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
   
   switch (orderStatus) {
     case StatusContext.TEXT:
       const userQuestion = ctx.message.text;  
-      await getAnswerFromModelText(userQuestion);
+      await getAnswerFromModelText(ctx,userQuestion);
       break;
     case StatusContext.PDF:
       const question = ctx.message.text;
-      const answer = await getAnswerFromModel(question);
+      const answer = await getAnswerFromModelPDF(question);
       ctx.reply(answer);
     break
     default:

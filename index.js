@@ -170,12 +170,12 @@ bot.command("clear", async (ctx) => {
     // Очищаем сохранённые ID сообщений
     botMessages.delete(chatId);
   }
-
+/*
   // Очищаем память
   if (memory.has(chatId)) {
     memory.delete(chatId);
     console.log(`История чата для ${chatId} очищена.`);
-  }
+  }*/
   conversationHistory = [];
   ctx.reply("История чата и сообщения удалены!");
 });

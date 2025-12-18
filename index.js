@@ -221,6 +221,7 @@ async function getAnswerFromModelPDF(question) {
   try {
     const relevantText = getRelevantTextForQuestion(question);
 
+     console.log('Релевантный текст для вопроса:', relevantText); // Для отладки
     // Добавляем вопрос и релевантный текст в историю беседы
     conversationHistory.push({ role: 'user', content: question });
 
@@ -266,6 +267,14 @@ bot.on("text", async (ctx) => {
       await getAnswerFromModelText(ctx,userQuestion);
       break;
     case StatusContext.PDF:
+      if (!pdfText.trim()) {
+      ctx.reply('Не удалось извлечь текст из PDF. Попробуйте другой файл.');
+     return;
+    }
+      if (orderStatus === StatusContext.PDF && !pdfText) {
+      ctx.reply('PDF не был обработан корректно. Попробуйте загрузить файл снова.');
+      return;
+    }
       const question = ctx.message.text;
       const answer = await getAnswerFromModelPDF(question);
       ctx.reply(answer);

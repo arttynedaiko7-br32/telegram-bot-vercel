@@ -261,6 +261,10 @@ async function getAnswerFromModelPDF(question) {
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
 bot.on("text", async (ctx) => {
+  if (orderStatus === StatusContext.PDF && !pdfText) {
+      ctx.reply('PDF не был обработан корректно. Попробуйте загрузить файл снова.');
+      return;
+    }
 
   /*  
   if (!pdfText) {
@@ -279,10 +283,6 @@ bot.on("text", async (ctx) => {
       if (!pdfText.trim()) {
       ctx.reply('Не удалось извлечь текст из PDF. Попробуйте другой файл.');
      return;
-    }
-      if (orderStatus === StatusContext.PDF && !pdfText) {
-      ctx.reply('PDF не был обработан корректно. Попробуйте загрузить файл снова.');
-      return;
     }
       const question = ctx.message.text;
       const answer = await getAnswerFromModelPDF(question);

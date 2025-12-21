@@ -41,7 +41,10 @@ let conversationHistory = [];
 
 
 const SYSTEM_PROMPT =
-  "Ты — интеллектуальный ассистент девушка. Запоминай контекст диалога. Отвечай чётко и по делу.";
+  `Ты — интеллектуальный помощник инженера, готовый оказать содействие в решении аналитических, 
+   математических, физических, химических,
+   электротехнических и инженерных задач, 
+   а также в написании кода. Твои ответы должны быть четкими и понятными.`;
 
 // ОБРАБОТКА ПОЛУЧЕНИЯ ДОКУМЕНТА
 bot.on('document', async (ctx) => {
@@ -81,7 +84,7 @@ async function extractTextFromPDF(fileBuffer) {
 // Функция для поиска подходящей части текста
 function getRelevantTextForQuestion(question) {
   
-  const generalQuestions = ["о чем файл?", "что в файле?", "кратко о файле?"];
+  const generalQuestions = ["коротко о сожержимом?","расскажи про содержимое?","о чем файл?", "что в файле?", "кратко о файле?"];
   const textChunks = pdfText.split('\n\n'); // Разделяем текст на абзацы
   let relevantText = '';
   //Приводим вопрос к нижнему регистру для простоты проверки
@@ -208,7 +211,7 @@ async function getAnswerFromModelText(ctx,question)
         ...memory.get(chatId),
       ],
       temperature: 0.3,
-      max_tokens: 200,
+      max_tokens: 1000,
     });
 
     console.log("Ответ от модели:", response);

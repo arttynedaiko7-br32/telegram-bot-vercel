@@ -1,9 +1,10 @@
 import { google } from "googleapis";
 
 const MAX_ROWS = 500;
-
+const rawCredentials = process.env.GOOGLE_CREDENTIALS?.trim();
+if (!rawCredentials) throw new Error("GOOGLE_CREDENTIALS не задана");
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+  credentials: JSON.parse(rawCredentials),
   scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 });
 

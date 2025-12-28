@@ -326,9 +326,10 @@ bot.command("table", async (ctx) => {
     const text = ctx.message.text;
 
     // /table read <url> <prompt>
-    const match = text.match(
-      /^\/table\s+read\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+)\s*(.*)$/s
-    );
+  const match = text.match(
+  /^\/table(?:\s+read)?\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+)(?:\s+([\s\S]*))?$/i
+);
+
 
     if (!match) {
       await ctx.reply(

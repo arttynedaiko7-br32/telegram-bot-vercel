@@ -294,7 +294,7 @@ async function askGroq(messages, tools) {
     };
   }
 }
-
+/*
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
@@ -320,7 +320,7 @@ bot.on("text", async (ctx) => {
       break;
   }
   
-});
+});*/
 bot.command("table", async (ctx) => {
   try {
     const text = ctx.message.text;

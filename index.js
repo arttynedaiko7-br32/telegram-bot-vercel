@@ -361,6 +361,10 @@ bot.command("table", async (ctx) => {
     // 3️⃣ Читаем таблицу
     const data = await readGoogleSheet({ spreadsheetId });
 
+    console.log("RAW DATA:", data.values);
+console.log("Первые 5 строк:", data.values.slice(0, 5));
+
+
     if (!data?.values) {
       await ctx.reply("❌ Не удалось прочитать данные из таблицы");
       return;

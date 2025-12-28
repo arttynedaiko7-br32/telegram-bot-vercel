@@ -3,6 +3,8 @@ import { Telegraf } from "telegraf";
 import Groq from "groq-sdk";
 import axios from 'axios'; 
 import pdfParse from 'pdf-parse';  
+import { tools } from "./tools.js";
+import { readGoogleSheet } from "./googleSheetsRead.js";
 
 const StatusContext = Object.freeze({
   TEXT: 0,
@@ -32,7 +34,7 @@ const bot = new Telegraf(TELEGRAM_TOKEN);
 
 // ---------- MEMORY ----------
 const memory = new Map();
-const MAX_HISTORY = 20; // Максимальное количество сообщений в истории
+const MAX_HISTORY = 5; // Максимальное количество сообщений в истории
 const botMessages = new Map(); // Сохранение ID сообщений, отправленных ботом
 
 // ---------- CONTEXT PDF ----------
@@ -124,6 +126,7 @@ bot.start((ctx) => {
 
 Команды:
 /help — список команд
+/table <ссылка на таблицу> <промт пользователя> - для чтения и анализа гугл таблиц
 /reset — очистить память
 /clear — очистить историю чата
 
@@ -233,7 +236,7 @@ async function getAnswerFromModelText(ctx,question)
 
   } catch (err) {
     console.error("Ошибка при запросе к модели:", err);
-    ctx.reply("❌ Ошибка при запросе к модели.");
+    ctx.reply("⏳ Временное ограничение API. Попробуйте через несколько минут.");
   }
 }
 
@@ -266,6 +269,31 @@ async function getAnswerFromModelPDF(question) {
     return 'Извините, произошла ошибка при обработке вашего запроса.';
   }
 }
+// --------------------------------------------------
+// ЗАПРОС К ГУГЛ ТАБЛИЦЕ
+// --------------------------------------------------
+
+async function askGroq(messages, tools) {
+  try {
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages,
+      tools,
+      tool_choice: "auto",
+      temperature: 0.0,
+      max_tokens: 1024
+    });
+
+    return completion;
+  } catch (err) {
+    return {
+      error: {
+        message: err.message,
+        status: err.status || 500
+      }
+    };
+  }
+}
 
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
@@ -292,6 +320,67 @@ bot.on("text", async (ctx) => {
       break;
   }
   
+});
+bot.command("table", async (ctx) => {
+  try {
+    const text = ctx.message.text;
+
+    // /table read <url> <prompt>
+    const match = text.match(
+      /^\/table\s+read\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+)\s*(.*)$/s
+    );
+
+    if (!match) {
+      await ctx.reply(
+        "❌ Формат команды:\n/table read <ссылка на таблицу> <что нужно сделать>"
+      );
+      return;
+    }
+
+    const sheetUrl = match[1];
+    const userPrompt = match[2] || "Проанализируй данные";
+
+    // spreadsheetId
+    const spreadsheetId = sheetUrl.split("/d/")[1].split("/")[0];
+
+    // читаем ВСЮ таблицу
+    const data = await readGoogleSheet({ spreadsheetId });
+
+    // messages
+    const messages = [
+      {
+        role: "system",
+        content: `
+You are a data analyst.
+Use ONLY the provided spreadsheet data.
+Do not invent missing values.
+`
+      },
+      {
+        role: "user",
+        content: `
+User request:
+${userPrompt}
+
+Spreadsheet data:
+${JSON.stringify(data.values, null, 2)}
+`
+      }
+    ];
+
+    const response = await askGroq(messages,tools);
+
+    if (response.error) {
+      await ctx.reply("⏳ Ошибка при анализе таблицы");
+      return;
+    }
+
+    await ctx.reply(response.choices[0].message.content);
+
+  } catch (err) {
+    console.error(err);
+    await ctx.reply("❌ Ошибка обработки команды");
+  }
 });
 
 // --------------------------------------------------

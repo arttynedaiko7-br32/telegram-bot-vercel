@@ -1,0 +1,117 @@
+const { Telegraf } = require('telegraf');
+const fetch = require('node-fetch');
+const fs = require('fs');
+const pdfParse = require('pdf-parse');
+
+
+// Инициализация бота
+const bot = new Telegraf('YOUR_TELEGRAM_BOT_API_TOKEN');
+
+
+
+let pdfText = "";
+let conversationHistory = [];
+
+// Стартовый обработчик
+bot.start((ctx) => ctx.reply('Привет! Отправьте мне PDF файл, и я помогу вам с вопросами. Вы можете использовать команду /reset для сброса контекста и /clear для очистки истории.'));
+
+// Команда /reset — сброс контекста
+bot.command('reset', (ctx) => {
+  pdfText = "";  // Очищаем текст PDF
+  conversationHistory = [];  // Очищаем историю сообщений
+  ctx.reply('Контекст был сброшен. Отправьте новый PDF файл, чтобы продолжить.');
+});
+
+// Команда /clear — очистка истории
+bot.command('clear', (ctx) => {
+  conversationHistory = [];  // Очищаем только историю сообщений
+  ctx.reply('История сообщений очищена. Вы можете продолжать задавать вопросы.');
+});
+
+// Обработчик получения документа
+bot.on('document', async (ctx) => {
+  const fileId = ctx.message.document.file_id;
+  const fileLink = await ctx.telegram.getFileLink(fileId);
+
+  // Скачиваем PDF
+  const response = await fetch(fileLink);
+  const buffer = await response.buffer();
+
+  // Извлекаем текст из PDF
+  const text = await extractTextFromPDF(buffer);
+  if (text) {
+    pdfText = text;
+    ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
+  } else {
+    ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
+  }
+});
+
+// Функция для извлечения текста из PDF
+async function extractTextFromPDF(fileBuffer) {
+  try {
+    const data = await pdfParse(fileBuffer);
+    return data.text; // возвращает весь текст из PDF
+  } catch (error) {
+    console.error('Ошибка при парсинге PDF:', error);
+    return null;
+  }
+}
+
+// Функция для поиска подходящей части текста
+function getRelevantTextForQuestion(question) {
+  const textChunks = pdfText.split('\n\n'); // Разделяем текст на абзацы
+  let relevantText = '';
+
+  // Поиск подходящего абзаца, который соответствует вопросу
+  textChunks.forEach(chunk => {
+    if (chunk.toLowerCase().includes(question.toLowerCase())) {
+      relevantText += chunk + '\n\n'; // Добавляем в ответ
+    }
+  });
+
+  return relevantText || 'Извините, я не нашел подходящей информации.';
+}
+
+// Функция для получения ответа от модели
+async function getAnswerFromModel(question) {
+  try {
+    const relevantText = getRelevantTextForQuestion(question);
+
+    // Добавляем вопрос и релевантный текст в историю беседы
+    conversationHistory.push({ role: 'user', content: question });
+
+    // Передаем контекст и релевантный текст в модель
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4',  // Выберите модель по вашему выбору
+      messages: [
+        { role: 'system', content: 'Ты ассистент, который помогает отвечать на вопросы по содержимому PDF.' },
+        { role: 'user', content: question },
+        { role: 'assistant', content: relevantText },  // Передаем только релевантный текст
+        ...conversationHistory,  // История сообщений
+      ],
+    });
+
+    // Добавляем ответ в историю для сохранения контекста
+    const answer = response.choices[0].message.content;
+    conversationHistory.push({ role: 'assistant', content: answer });
+
+    return answer;
+  } catch (error) {
+    console.error('Ошибка при запросе к OpenAI:', error);
+    return 'Извините, произошла ошибка при обработке вашего запроса.';
+  }
+}
+
+// Обработчик текстовых сообщений (вопросы от пользователя)
+bot.on('text', async (ctx) => {
+  if (!pdfText) {
+    ctx.reply('Пожалуйста, отправьте PDF файл для обработки.');
+    return;
+  }
+
+  const question = ctx.message.text;
+  const answer = await getAnswerFromModel(question);
+  ctx.reply(answer);
+});
+

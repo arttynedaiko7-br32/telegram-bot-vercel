@@ -325,40 +325,50 @@ bot.command("table", async (ctx) => {
   try {
     const text = ctx.message.text;
 
-    // /table read <url> <prompt>
- const match = text.match(
-  /^\/table\s+https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)[^\s]*\s*(.*)$/i
-);
-console.log("TEXT:", ctx.message.text);
-console.log("ENTITIES:", ctx.message.entities);
+    console.log("TEXT:", text);
+    console.log("ENTITIES:", ctx.message.entities);
 
-
+    // 1️⃣ Парсим ПОЛНЫЙ URL + prompt
+    const match = text.match(
+      /^\/table\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+[^\s]*)\s*(.*)$/i
+    );
 
     if (!match) {
       await ctx.reply(
-        "❌ Формат команды:\n/table read <ссылка на таблицу> <что нужно сделать>"
+        "❌ Формат команды:\n/table <ссылка на таблицу> <что нужно сделать>"
       );
       return;
     }
 
-    const sheetUrl = match[1];
-    const userPrompt = match[2] || "Проанализируй данные";
+    const sheetUrl = match[1];                 // ✅ ПОЛНЫЙ URL
+    const userPrompt = match[2]?.trim() || "Проанализируй данные";
 
-    // spreadsheetId
-    const spreadsheetId = sheetUrl.split("/d/")[1].split("/")[0];
+    // 2️⃣ Извлекаем ID ИЗ URL (без split)
+    const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (!idMatch) {
+      await ctx.reply("❌ Не удалось извлечь ID таблицы");
+      return;
+    }
 
-    // читаем ВСЮ таблицу
+    const spreadsheetId = idMatch[1];
+
+    console.log("SHEET URL:", sheetUrl);
+    console.log("SPREADSHEET ID:", spreadsheetId);
+    console.log("PROMPT:", userPrompt);
+
+    // 3️⃣ Читаем таблицу
     const data = await readGoogleSheet({ spreadsheetId });
 
-    // messages
+    if (!data?.values) {
+      await ctx.reply("❌ Не удалось прочитать данные из таблицы");
+      return;
+    }
+
     const messages = [
       {
         role: "system",
-        content: `
-You are a data analyst.
-Use ONLY the provided spreadsheet data.
-Do not invent missing values.
-`
+        content:
+          "You are a data analyst. Use ONLY the provided spreadsheet data. Do not invent missing values."
       },
       {
         role: "user",
@@ -372,20 +382,24 @@ ${JSON.stringify(data.values, null, 2)}
       }
     ];
 
-    const response = await askGroq(messages,tools);
+    const response = await askGroq(messages, tools);
 
-    if (response.error) {
+    if (!response?.choices?.[0]?.message?.content) {
       await ctx.reply("⏳ Ошибка при анализе таблицы");
       return;
     }
 
-    await ctx.reply(response.choices[0].message.content);
+    // 4️⃣ Можно вернуть ссылку пользователю
+    await ctx.reply(
+      `📊 Анализ таблицы:\n${sheetUrl}\n\n${response.choices[0].message.content}`
+    );
 
   } catch (err) {
-    console.error(err);
+    console.error("TABLE COMMAND ERROR:", err);
     await ctx.reply("❌ Ошибка обработки команды");
   }
 });
+
 
 // --------------------------------------------------
 // ВЕРСЕЛЬ WEBHOOK (обработка webhook в коде)

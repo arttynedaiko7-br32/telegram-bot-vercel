@@ -284,8 +284,10 @@ async function askGroq(messages, tools) {
       max_tokens: 1024
     });
 
+    console.log("🎯 Ответ от groq:", completion);
     return completion;
   } catch (err) {
+    console.error("❌ Ошибка в askGroq:", err);
     return {
       error: {
         message: err.message,
@@ -384,10 +386,25 @@ ${JSON.stringify(data.values, null, 2)}
 
     const response = await askGroq(messages, tools);
 
-    if (!response?.choices?.[0]?.message?.content) {
-      await ctx.reply("⏳ Ошибка при анализе таблицы");
-      return;
-    }
+if (!response) {
+  console.error("❌ askGroq вернул undefined или null");
+  await ctx.reply("⏳ Ошибка: нет ответа от askGroq");
+  return;
+}
+
+if (response.error) {
+  console.error("❌ Ошибка от groq API:", response.error);
+  await ctx.reply(`⏳ Ошибка при анализе таблицы: ${response.error.message}`);
+  return;
+}
+
+if (!response.choices?.[0]?.message?.content) {
+  console.warn("⚠️ Ответ пришёл, но content пустой:", response);
+  await ctx.reply("⏳ Ошибка при анализе таблицы: пустой результат");
+  return;
+}
+
+console.log("✅ Успешный ответ:", response.choices[0].message.content);
 
     // 4️⃣ Можно вернуть ссылку пользователю
     await ctx.reply(

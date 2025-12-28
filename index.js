@@ -278,8 +278,8 @@ async function askGroq(messages, tools) {
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages,
-      tools,
-      tool_choice: "auto",
+      //tools,
+      //tool_choice: "auto",
       temperature: 0.0,
       max_tokens: 1024
     });

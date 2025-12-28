@@ -326,8 +326,8 @@ bot.command("table", async (ctx) => {
     const text = ctx.message.text;
 
     // /table read <url> <prompt>
-  const match = text.match(
-  /^\/table(?:\s+read)?\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+)(?:\s+([\s\S]*))?$/i
+ const match = text.match(
+  /^\/table\s+https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)[^\s]*\s*(.*)$/i
 );
 console.log("TEXT:", ctx.message.text);
 console.log("ENTITIES:", ctx.message.entities);

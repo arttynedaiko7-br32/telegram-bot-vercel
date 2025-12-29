@@ -398,12 +398,25 @@ bot.on('text', async (ctx) => {
       session.messages.push({
         role: 'system',
         content: `Ты — аналитик данных.
-Ты работаешь с Google Sheets.
-Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
-Ты можешь задавать уточняющие вопросы.
-Ты должен учитывать предыдущие сообщения.
-Не придумывай данные.`
+        Ты работаешь с Google Sheets.
+        Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
+        Ты можешь задавать уточняющие вопросы.
+        Ты должен учитывать предыдущие сообщения.
+        Не придумывай данные.`
       });
+
+      const isTableUrlSystem = (m) =>
+      m.role === 'system' && m.content.startsWith('Spreadsheet URL:');
+
+      if (session.messages.length > 4) {
+      const indexToRemove = session.messages.findIndex(
+      m => !isTableUrlSystem(m)
+  );
+
+  if (indexToRemove !== -1) {
+    session.messages.splice(indexToRemove, 1);
+  }
+}
 
       session.messages.push({
         role: 'system',
@@ -427,7 +440,9 @@ bot.on('text', async (ctx) => {
         if (!message?.content) {
           return ctx.reply('❌ Модель вернула пустой ответ');
         }
-
+if (session.messages.length > 4) {
+  session.messages = session.messages.slice(-12);
+}
         session.messages.push({
           role: 'assistant',
           content: message.content

@@ -343,48 +343,42 @@ bot.on("text", async (ctx) => {
 });*/
 bot.command("table", async (ctx) => {
   try {
-  /*  const text = ctx.message.text;
+ 
+     const text = ctx.message.text;
+    const entities = ctx.message.entities || [];
 
-    console.log("TEXT:", text);
-    console.log("ENTITIES:", ctx.message.entities);
+    console.log('TEXT:', text);
+    console.log('ENTITIES:', entities);
 
-    // 1️⃣ Парсим ПОЛНЫЙ URL + prompt
-    const match = text.match(
-      /^\/table\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+[^\s]*)\s*(.*)$/i
-    );
+    // 1️⃣ Ищем URL, который Telegram уже распарсил
+    const urlEntity = entities.find(e => e.type === 'url');
 
-    if (!match) {
-      await ctx.reply(
-        "❌ Формат команды:\n/table <ссылка на таблицу> <что нужно сделать>"
+    if (!urlEntity) {
+      return ctx.reply(
+        '❌ Формат команды:\n/table <ссылка на Google Sheets> <что нужно сделать>'
       );
-      return;
     }
 
-    const sheetUrl = match[1];                 // ✅ ПОЛНЫЙ URL
-    const userPrompt = match[2]?.trim() || "Проанализируй данные";
-*/
-     const text = ctx.message.text.replace('/table', '').trim();
-      // ✅ объявляем ВНЕ if
-    const urlMatch = text.match(
-       /https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+/
+    // 2️⃣ Достаём ПОЛНЫЙ URL
+    const sheetUrl = text.substring(
+      urlEntity.offset,
+      urlEntity.offset + urlEntity.length
     );
 
-    if (!urlMatch) {
-      return ctx.reply('❌ Не найдена ссылка на Google Sheets');
-    }
-
-    // Извлекаем ссылку и оставшийся текст
-   const sheetUrl = urlMatch[0]; // ✅ теперь определена
-    const spreadsheetId = sheetUrl.split('/d/')[1].split('/')[0];
-    const userPrompt =
-      text.replace(sheetUrl, '').trim() || 'Проанализируй таблицу';
-
-    // 2️⃣ Извлекаем ID ИЗ URL (без split)
+    // 3️⃣ Извлекаем spreadsheetId
     const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
     if (!idMatch) {
-      await ctx.reply("❌ Не удалось извлечь ID таблицы");
-      return;
+      return ctx.reply('❌ Не удалось извлечь ID таблицы');
     }
+
+    const spreadsheetId = idMatch[1];
+
+    // 4️⃣ Достаём пользовательский промт (всё, кроме /table и ссылки)
+    const userPrompt =
+      text
+        .replace('/table', '')
+        .replace(sheetUrl, '')
+        .trim() || 'Проанализируй данные';
 
     //const spreadsheetId = idMatch[1];
 

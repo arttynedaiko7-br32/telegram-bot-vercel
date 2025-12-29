@@ -366,11 +366,10 @@ bot.command("table", async (ctx) => {
      const text = ctx.message.text.replace('/table', '').trim();
 
     // Извлекаем ссылку и оставшийся текст
-    const urlMatch = text.match(/https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (!urlMatch) return ctx.reply('❌ Не найдена ссылка на Google Sheets');
-
-    //const spreadsheetId = urlMatch[1];
-    const userPrompt = text.replace(urlMatch[0], '').trim() || 'Проанализируй таблицу';
+   const sheetUrl = urlMatch[0]; // ✅ теперь определена
+    const spreadsheetId = sheetUrl.split('/d/')[1].split('/')[0];
+    const userPrompt =
+      text.replace(sheetUrl, '').trim() || 'Проанализируй таблицу';
 
     // 2️⃣ Извлекаем ID ИЗ URL (без split)
     const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -379,7 +378,7 @@ bot.command("table", async (ctx) => {
       return;
     }
 
-    const spreadsheetId = idMatch[1];
+    //const spreadsheetId = idMatch[1];
 
     console.log("SHEET URL:", sheetUrl);
     console.log("SPREADSHEET ID:", spreadsheetId);
@@ -420,16 +419,19 @@ const messages = [
 { role: 'user', content: userPrompt }
 ];*/
 const messages = [
-  {
-    role: "system",
-    content: `Ты — аналитик данных. Если пользователь запрашивает анализ таблицы, и у тебя нет данных, используй доступный инструмент "read_google_sheet" для получения данных. 
-    Используй инструмент только тогда, когда нужны реальные данные таблицы.`
-  },
-  {
-    role: "user",
-    content: `User request: ${userPrompt}`
-  }
-];
+      {
+        role: 'system',
+        content: `
+Ты — аналитик данных.
+Если данных таблицы нет — используй инструмент "read_google_sheet".
+Не придумывай данные.
+`
+      },
+      {
+        role: 'user',
+        content: `User request: ${userPrompt}\nSpreadsheet URL: ${sheetUrl}`
+      }
+    ];
   const response = await askGroq(messages,tools);
 const content = response.choices[0].message.content;
 

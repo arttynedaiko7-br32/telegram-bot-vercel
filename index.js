@@ -278,8 +278,8 @@ async function askGroq(messages, tools) {
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages,
-      //tools,
-      //tool_choice: "auto",
+      tools,
+      tool_choice: "auto",
       temperature: 0.0,
       max_tokens: 1024
     });
@@ -296,7 +296,7 @@ async function askGroq(messages, tools) {
     };
   }
 }
-
+/*
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
@@ -322,7 +322,7 @@ bot.on("text", async (ctx) => {
       break;
   }
   
-});/*
+});*/
 bot.command("table", async (ctx) => {
   try {
     const text = ctx.message.text;
@@ -357,7 +357,7 @@ bot.command("table", async (ctx) => {
     console.log("SHEET URL:", sheetUrl);
     console.log("SPREADSHEET ID:", spreadsheetId);
     console.log("PROMPT:", userPrompt);
-
+/*
     // 3️⃣ Читаем таблицу
     const data = await readGoogleSheet({ spreadsheetId });
 
@@ -369,7 +369,7 @@ console.log("Первые 5 строк:", data.values.slice(0, 5));
       await ctx.reply("❌ Не удалось прочитать данные из таблицы");
       return;
     }
-
+*//*
     const messages = [
       {
         role: "system",
@@ -387,9 +387,37 @@ ${JSON.stringify(data.values, null, 2)}
 `
       }
     ];
+*/
+const messages = [
+{ role: 'system', content: 'You are a data analyst. Use ONLY the provided spreadsheet data.' },
+{ role: 'user', content: userPrompt }
+];
 
     const response = await askGroq(messages, tools);
+    // Проверяем, есть ли tool_call
+if (response.choices[0].message.tool_call) {
+const toolCall = response.choices[0].message.tool_call;
+const toolResult = await handleToolCall(toolCall);
 
+
+// Отправляем результат инструмента обратно модели
+messages.push({ role: 'tool', name: toolResult.tool_name, content: JSON.stringify(toolResult.result) });
+response = await askGroq(messages); // вызываем снова без tools
+}
+
+
+const content = response.choices[0].message.content;
+if (!content) return ctx.reply('⏳ Ошибка: пустой результат');
+
+
+ctx.reply(`📊 Анализ таблицы:\n${content}`);
+
+} catch (err) {
+console.error(err);
+ctx.reply('❌ Ошибка обработки команды');
+}
+
+    /*
 if (!response) {
   console.error("❌ askGroq вернул undefined или null");
   await ctx.reply("⏳ Ошибка: нет ответа от askGroq");
@@ -418,10 +446,26 @@ console.log("✅ Успешный ответ:", response.choices[0].message.cont
   } catch (err) {
     console.error("TABLE COMMAND ERROR:", err);
     await ctx.reply("❌ Ошибка обработки команды");
-  }
+  }*/
 });
 
-*/
+// --------------------------------------------------
+// Функция callback tool
+// --------------------------------------------------
+export async function handleToolCall(toolCall) {
+if (toolCall.name === "read_google_sheet") {
+const { spreadsheetId, sheetName } = toolCall.arguments;
+const data = await readGoogleSheet({ spreadsheetId, sheetName });
+return {
+tool_name: toolCall.name,
+result: data.values
+};
+}
+throw new Error(`Unknown tool: ${toolCall.name}`);
+}
+
+
+
 // --------------------------------------------------
 // ВЕРСЕЛЬ WEBHOOK (обработка webhook в коде)
 // --------------------------------------------------

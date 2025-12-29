@@ -274,7 +274,6 @@ async function getAnswerFromModelPDF(question) {
 // --------------------------------------------------
 async function askGroq(messages, tools) {
   try {
-    // 1️⃣ Первый вызов модели с tools
     let response = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
       messages,
@@ -315,10 +314,10 @@ async function askGroq(messages, tools) {
         max_tokens: 1024
       });
     }
+
     if (!response?.choices) {
   throw new Error("LLM response has no choices");
 }
-
 
     return response;
 
@@ -327,7 +326,7 @@ async function askGroq(messages, tools) {
     return { error: { message: err.message, status: err.status || 500 } };
   }
 }
-/*
+
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
@@ -353,7 +352,8 @@ bot.on("text", async (ctx) => {
       break;
   }
   
-});*/
+});
+
 bot.command("table", async (ctx) => {
   try {
  
@@ -450,10 +450,6 @@ async function handleToolCall(toolCall) {
       throw new Error(`Unknown tool: ${toolName}`);
   }
 }
-
-
-
-
 
 // --------------------------------------------------
 // ВЕРСЕЛЬ WEBHOOK (обработка webhook в коде)

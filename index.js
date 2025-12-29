@@ -275,26 +275,39 @@ async function getAnswerFromModelPDF(question) {
 
 async function askGroq(messages, tools) {
   try {
-    const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages,
-      tools,
-      tool_choice: "auto",
-      temperature: 0.0,
-      max_tokens: 1024
-    });
+// 1️⃣ Первый вызов модели с tools
+let response = await groq.chat.completions.create({
+model: 'llama-3.1-8b-instant',
+messages,
+tools,
+tool_choice: 'auto',
+temperature: 0.0,
+max_tokens: 1024
+});
 
-    console.log("🎯 Ответ от groq:", completion);
-    return completion;
-  } catch (err) {
-    console.error("❌ Ошибка в askGroq:", err);
-    return {
-      error: {
-        message: err.message,
-        status: err.status || 500
-      }
-    };
-  }
+
+// 2️⃣ Проверяем, есть ли tool_call
+const toolCall = response.choices[0].message.tool_call;
+if (toolCall) {
+const toolResult = await handleToolCall(toolCall);
+messages.push({ role: 'tool', name: toolResult.tool_name, content: JSON.stringify(toolResult.result) });
+
+
+// 3️⃣ Второй вызов модели без tools для получения content
+response = await groq.chat.completions.create({
+model: 'llama-3.1-8b-instant',
+messages,
+temperature: 0.0,
+max_tokens: 1024
+});
+}
+
+
+return response;
+} catch (err) {
+console.error('askGroq error:', err);
+return { error: { message: err.message, status: err.status || 500 } };
+}
 }
 /*
 // --------------------------------------------------
@@ -393,27 +406,18 @@ const messages = [
 { role: 'user', content: userPrompt }
 ];
 
-    const response = await askGroq(messages, tools);
-    // Проверяем, есть ли tool_call
-if (response.choices[0].message.tool_call) {
-const toolCall = response.choices[0].message.tool_call;
-const toolResult = await handleToolCall(toolCall);
-
-
-// Отправляем результат инструмента обратно модели
-messages.push({ role: 'tool', name: toolResult.tool_name, content: JSON.stringify(toolResult.result) });
-response = await askGroq(messages); // вызываем снова без tools
-}
-
-
+  const response = await askGroq(messages);
 const content = response.choices[0].message.content;
+
+
 if (!content) return ctx.reply('⏳ Ошибка: пустой результат');
 
 
 ctx.reply(`📊 Анализ таблицы:\n${content}`);
 
+
 } catch (err) {
-console.error(err);
+console.error('TABLE COMMAND ERROR:', err);
 ctx.reply('❌ Ошибка обработки команды');
 }
 

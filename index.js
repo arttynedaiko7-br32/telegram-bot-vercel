@@ -430,7 +430,7 @@ const messages = [
     content: `User request: ${userPrompt}`
   }
 ];
-  const response = await askGroq(messages);
+  const response = await askGroq(messages,tools);
 const content = response.choices[0].message.content;
 
 

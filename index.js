@@ -291,6 +291,8 @@ async function askGroq(messages, tools) {
 
 
     const message = response.choices[0].message;
+    const toolCall = message.tool_calls?.[0];
+
 
     // 🔥 ВАЖНО: tool_calls (массив), а не tool_call
     if (message.tool_calls && message.tool_calls.length > 0) {
@@ -313,6 +315,10 @@ async function askGroq(messages, tools) {
         max_tokens: 1024
       });
     }
+    if (!response?.choices) {
+  throw new Error("LLM response has no choices");
+}
+
 
     return response;
 
@@ -442,8 +448,16 @@ const messages = [
       }
     ];
   const response = await askGroq(messages,tools);
-const content = response.choices[0].message.content;
+const content = response?.choices?.[0]?.message?.content;
 
+if (!content) {
+  throw new Error("Модель вернула пустой ответ");
+}
+
+
+if (response?.error) {
+  throw new Error(response.error.message);
+}
 
 if (!content) return ctx.reply('⏳ Ошибка: пустой результат');
 
@@ -453,7 +467,7 @@ ctx.reply(`📊 Анализ таблицы:\n${content}`);
 
 } catch (err) {
 console.error('TABLE COMMAND ERROR:', err);
-ctx.reply('❌ Ошибка обработки команды');
+ctx.reply('❌ Ошибка обработки команды:\n' + err.message);
 }
 
     /*

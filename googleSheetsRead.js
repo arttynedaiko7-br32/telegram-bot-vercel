@@ -15,7 +15,8 @@ export async function readGoogleSheet({ spreadsheetId, sheetName }) {
     throw new Error("spreadsheetId is required");
   }
 
-  let targetSheetName = sheetName;
+ // let targetSheetName = sheetName;
+let targetSheetName = null;
 
   // 1️⃣ Если имя листа не передано — получаем первый лист
   if (!targetSheetName) {

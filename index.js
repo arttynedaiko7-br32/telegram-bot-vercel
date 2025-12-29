@@ -366,7 +366,7 @@ bot.command("table", async (ctx) => {
      const text = ctx.message.text.replace('/table', '').trim();
       // ✅ объявляем ВНЕ if
     const urlMatch = text.match(
-       /^\/table\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+[^\s]*)\s*(.*)$/i
+       /https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+/
     );
 
     if (!urlMatch) {

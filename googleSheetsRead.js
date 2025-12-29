@@ -34,7 +34,7 @@ export async function readGoogleSheet({ spreadsheetId, sheetName }) {
   // 2️⃣ Читаем значения листа (ТОЛЬКО values.get)
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,                           // ✅ обязательно
-    range: targetSheetName                  // Sheet1 или Sheet1!A1:Z500
+    range: `${targetSheetName}!A1`                 // Sheet1 или Sheet1!A1:Z500
   });
 
   return {

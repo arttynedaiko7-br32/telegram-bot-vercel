@@ -382,7 +382,7 @@ console.log("Первые 5 строк:", data.values.slice(0, 5));
       await ctx.reply("❌ Не удалось прочитать данные из таблицы");
       return;
     }
-*//*
+*/
     const messages = [
       {
         role: "system",
@@ -400,11 +400,11 @@ ${JSON.stringify(data.values, null, 2)}
 `
       }
     ];
-*/
+/*
 const messages = [
 { role: 'system', content: 'You are a data analyst. Use ONLY the provided spreadsheet data.' },
 { role: 'user', content: userPrompt }
-];
+];*/
 
   const response = await askGroq(messages);
 const content = response.choices[0].message.content;

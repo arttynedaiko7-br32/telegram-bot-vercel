@@ -432,7 +432,7 @@ const messages = [
         role: 'system',
         content: `
 Ты — аналитик данных.
-Если данных таблицы нет — используй инструмент "read_google_sheet".
+Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
 Не придумывай данные.
 `
       },
@@ -491,17 +491,28 @@ console.log("✅ Успешный ответ:", response.choices[0].message.cont
 // --------------------------------------------------
 // Функция callback tool
 // --------------------------------------------------
-export async function handleToolCall(toolCall) {
-if (toolCall.name === "read_google_sheet") {
-const { spreadsheetId, sheetName } = toolCall.arguments;
-const data = await readGoogleSheet({ spreadsheetId, sheetName });
-return {
-tool_name: toolCall.name,
-result: data.values
-};
+async function handleToolCall(toolCall) {
+  const toolName = toolCall.function.name;
+  const args = JSON.parse(toolCall.function.arguments || "{}");
+
+  switch (toolName) {
+    case "read_google_sheet": {
+      const result = await readGoogleSheet(
+        args.spreadsheetId,
+        args.sheetName
+      );
+
+      return {
+        tool_name: toolName,
+        result
+      };
+    }
+
+    default:
+      throw new Error(`Unknown tool: ${toolName}`);
+  }
 }
-throw new Error(`Unknown tool: ${toolCall.name}`);
-}
+
 
 
 

@@ -272,42 +272,47 @@ async function getAnswerFromModelPDF(question) {
 // --------------------------------------------------
 // ЗАПРОС К ГУГЛ ТАБЛИЦЕ
 // --------------------------------------------------
-
 async function askGroq(messages, tools) {
   try {
-// 1️⃣ Первый вызов модели с tools
-let response = await groq.chat.completions.create({
-model: 'llama-3.1-8b-instant',
-messages,
-tools,
-tool_choice: 'auto',
-temperature: 0.0,
-max_tokens: 1024
-});
+    // 1️⃣ Первый вызов модели с tools
+    let response = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages,
+      tools,
+      tool_choice: 'auto',
+      temperature: 0.0,
+      max_tokens: 1024
+    });
 
+    // 2️⃣ Проверяем, выбрала ли модель инструмент
+    const toolCall = response.choices[0].message.tool_call;
 
-// 2️⃣ Проверяем, есть ли tool_call
-const toolCall = response.choices[0].message.tool_call;
-if (toolCall) {
-const toolResult = await handleToolCall(toolCall);
-messages.push({ role: 'tool', name: toolResult.tool_name, content: JSON.stringify(toolResult.result) });
+    if (toolCall) {
+      // 3️⃣ Выполняем инструмент и получаем данные
+      const toolResult = await handleToolCall(toolCall);
 
+      // 4️⃣ Добавляем данные инструмента в историю сообщений
+      messages.push({
+        role: 'tool',
+        name: toolResult.tool_name,
+        content: JSON.stringify(toolResult.result, null, 2)
+      });
 
-// 3️⃣ Второй вызов модели без tools для получения content
-response = await groq.chat.completions.create({
-model: 'llama-3.1-8b-instant',
-messages,
-temperature: 0.0,
-max_tokens: 1024
-});
-}
+      // 5️⃣ Второй вызов модели без tools, чтобы она использовала полученные данные
+      response = await groq.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        messages,
+        temperature: 0.0,
+        max_tokens: 1024
+      });
+    }
 
+    return response;
 
-return response;
-} catch (err) {
-console.error('askGroq error:', err);
-return { error: { message: err.message, status: err.status || 500 } };
-}
+  } catch (err) {
+    console.error('askGroq error:', err);
+    return { error: { message: err.message, status: err.status || 500 } };
+  }
 }
 /*
 // --------------------------------------------------
@@ -338,7 +343,7 @@ bot.on("text", async (ctx) => {
 });*/
 bot.command("table", async (ctx) => {
   try {
-    const text = ctx.message.text;
+  /*  const text = ctx.message.text;
 
     console.log("TEXT:", text);
     console.log("ENTITIES:", ctx.message.entities);
@@ -357,6 +362,15 @@ bot.command("table", async (ctx) => {
 
     const sheetUrl = match[1];                 // ✅ ПОЛНЫЙ URL
     const userPrompt = match[2]?.trim() || "Проанализируй данные";
+*/
+     const text = ctx.message.text.replace('/table', '').trim();
+
+    // Извлекаем ссылку и оставшийся текст
+    const urlMatch = text.match(/https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (!urlMatch) return ctx.reply('❌ Не найдена ссылка на Google Sheets');
+
+    //const spreadsheetId = urlMatch[1];
+    const userPrompt = text.replace(urlMatch[0], '').trim() || 'Проанализируй таблицу';
 
     // 2️⃣ Извлекаем ID ИЗ URL (без split)
     const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -382,7 +396,7 @@ console.log("Первые 5 строк:", data.values.slice(0, 5));
       await ctx.reply("❌ Не удалось прочитать данные из таблицы");
       return;
     }
-*/
+*//*
     const messages = [
       {
         role: "system",
@@ -399,13 +413,23 @@ Spreadsheet data:
 ${JSON.stringify(data.values, null, 2)}
 `
       }
-    ];
+    ];*/
 /*
 const messages = [
 { role: 'system', content: 'You are a data analyst. Use ONLY the provided spreadsheet data.' },
 { role: 'user', content: userPrompt }
 ];*/
-
+const messages = [
+  {
+    role: "system",
+    content: `Ты — аналитик данных. Если пользователь запрашивает анализ таблицы, и у тебя нет данных, используй доступный инструмент "read_google_sheet" для получения данных. 
+    Используй инструмент только тогда, когда нужны реальные данные таблицы.`
+  },
+  {
+    role: "user",
+    content: `User request: ${userPrompt}`
+  }
+];
   const response = await askGroq(messages);
 const content = response.choices[0].message.content;
 

@@ -284,21 +284,28 @@ async function askGroq(messages, tools) {
       max_tokens: 1024
     });
 
-    // 2️⃣ Проверяем, выбрала ли модель инструмент
-    const toolCall = response.choices[0].message.tool_call;
+    console.log(
+  'MODEL MESSAGE:',
+  JSON.stringify(response.choices[0].message, null, 2)
+);
 
-    if (toolCall) {
-      // 3️⃣ Выполняем инструмент и получаем данные
-      const toolResult = await handleToolCall(toolCall);
 
-      // 4️⃣ Добавляем данные инструмента в историю сообщений
-      messages.push({
-        role: 'tool',
-        name: toolResult.tool_name,
-        content: JSON.stringify(toolResult.result, null, 2)
-      });
+    const message = response.choices[0].message;
 
-      // 5️⃣ Второй вызов модели без tools, чтобы она использовала полученные данные
+    // 🔥 ВАЖНО: tool_calls (массив), а не tool_call
+    if (message.tool_calls && message.tool_calls.length > 0) {
+
+      for (const toolCall of message.tool_calls) {
+        const toolResult = await handleToolCall(toolCall);
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id, // 🔥 ОБЯЗАТЕЛЬНО
+          content: JSON.stringify(toolResult.result, null, 2)
+        });
+      }
+
+      // 2️⃣ Второй вызов модели БЕЗ tools
       response = await groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         messages,

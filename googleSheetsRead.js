@@ -11,29 +11,35 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: "v4", auth });
 
 export async function readGoogleSheet({ spreadsheetId, sheetName }) {
+  if (!spreadsheetId) {
+    throw new Error("spreadsheetId is required");
+  }
+
   let targetSheetName = sheetName;
 
   // 1️⃣ Если имя листа не передано — получаем первый лист
   if (!targetSheetName) {
     const meta = await sheets.spreadsheets.get({
-      spreadsheetId,
+      spreadsheetId,                         // ✅ обязательно
       fields: "sheets.properties.title"
     });
 
-    targetSheetName = meta.data.sheets?.[0]?.properties?.title;
+    targetSheetName = meta?.data?.sheets?.[0]?.properties?.title;
 
     if (!targetSheetName) {
       throw new Error("Не удалось определить лист таблицы");
     }
   }
 
-  // 2️⃣ Читаем значения листа
+  // 2️⃣ Читаем значения листа (ТОЛЬКО values.get)
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: targetSheetName
+    spreadsheetId,                           // ✅ обязательно
+    range: targetSheetName                  // Sheet1 или Sheet1!A1:Z500
   });
 
   return {
-    values: (res.data.values || []).slice(0, MAX_ROWS)
+    sheetName: targetSheetName,
+    rowCount: res?.data?.values?.length || 0,
+    values: (res?.data?.values || []).slice(0, MAX_ROWS)
   };
 }

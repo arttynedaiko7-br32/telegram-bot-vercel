@@ -497,10 +497,10 @@ async function handleToolCall(toolCall) {
 
   switch (toolName) {
     case "read_google_sheet": {
-      const result = await readGoogleSheet(
-        args.spreadsheetId,
-        args.sheetName
-      );
+      const result = await readGoogleSheet({
+        spreadsheetId: args.spreadsheetId,
+        sheetName: args.sheetName
+      });
 
       return {
         tool_name: toolName,
@@ -512,6 +512,7 @@ async function handleToolCall(toolCall) {
       throw new Error(`Unknown tool: ${toolName}`);
   }
 }
+
 
 
 

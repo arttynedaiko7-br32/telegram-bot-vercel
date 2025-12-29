@@ -357,13 +357,10 @@ bot.on("text", async (ctx) => {
 bot.command("table", async (ctx) => {
   try {
  
-     const text = ctx.message.text;
+    const text = ctx.message.text;
     const entities = ctx.message.entities || [];
 
-    console.log('TEXT:', text);
-    console.log('ENTITIES:', entities);
-
-    // 1️⃣ Ищем URL, который Telegram уже распарсил
+    //Ищем URL, который Telegram уже распарсил
     const urlEntity = entities.find(e => e.type === 'url');
 
     if (!urlEntity) {
@@ -372,13 +369,13 @@ bot.command("table", async (ctx) => {
       );
     }
 
-    // 2️⃣ Достаём ПОЛНЫЙ URL
+    //Достаём ПОЛНЫЙ URL
     const sheetUrl = text.substring(
       urlEntity.offset,
       urlEntity.offset + urlEntity.length
     );
 
-    // 3️⃣ Извлекаем spreadsheetId
+    //Извлекаем spreadsheetId
     const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
     if (!idMatch) {
       return ctx.reply('❌ Не удалось извлечь ID таблицы');
@@ -386,61 +383,19 @@ bot.command("table", async (ctx) => {
 
     const spreadsheetId = idMatch[1];
 
-    // 4️⃣ Достаём пользовательский промт (всё, кроме /table и ссылки)
+    //Достаём пользовательский промт (всё, кроме /table и ссылки)
     const userPrompt =
       text
         .replace('/table', '')
         .replace(sheetUrl, '')
         .trim() || 'Проанализируй данные';
-
-    //const spreadsheetId = idMatch[1];
-
-    console.log("SHEET URL:", sheetUrl);
-    console.log("SPREADSHEET ID:", spreadsheetId);
-    console.log("PROMPT:", userPrompt);
-/*
-    // 3️⃣ Читаем таблицу
-    const data = await readGoogleSheet({ spreadsheetId });
-
-    console.log("RAW DATA:", data.values);
-console.log("Первые 5 строк:", data.values.slice(0, 5));
-
-
-    if (!data?.values) {
-      await ctx.reply("❌ Не удалось прочитать данные из таблицы");
-      return;
-    }
-*//*
-    const messages = [
-      {
-        role: "system",
-        content:
-          "You are a data analyst. Use ONLY the provided spreadsheet data. Do not invent missing values."
-      },
-      {
-        role: "user",
-        content: `
-User request:
-${userPrompt}
-
-Spreadsheet data:
-${JSON.stringify(data.values, null, 2)}
-`
-      }
-    ];*/
-/*
-const messages = [
-{ role: 'system', content: 'You are a data analyst. Use ONLY the provided spreadsheet data.' },
-{ role: 'user', content: userPrompt }
-];*/
+    
 const messages = [
       {
         role: 'system',
-        content: `
-Ты — аналитик данных.
-Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
-Не придумывай данные.
-`
+        content: `Ты — аналитик данных.
+        Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
+        Не придумывай данные.`
       },
       {
         role: 'user',
@@ -466,40 +421,10 @@ ctx.reply(`📊 Анализ таблицы:\n${content}`);
 
 
 } catch (err) {
-console.error('TABLE COMMAND ERROR:', err);
+//console.error('TABLE COMMAND ERROR:', err);
 ctx.reply('❌ Ошибка обработки команды:\n' + err.message);
 }
 
-    /*
-if (!response) {
-  console.error("❌ askGroq вернул undefined или null");
-  await ctx.reply("⏳ Ошибка: нет ответа от askGroq");
-  return;
-}
-
-if (response.error) {
-  console.error("❌ Ошибка от groq API:", response.error);
-  await ctx.reply(`⏳ Ошибка при анализе таблицы: ${response.error.message}`);
-  return;
-}
-
-if (!response.choices?.[0]?.message?.content) {
-  console.warn("⚠️ Ответ пришёл, но content пустой:", response);
-  await ctx.reply("⏳ Ошибка при анализе таблицы: пустой результат");
-  return;
-}
-
-console.log("✅ Успешный ответ:", response.choices[0].message.content);
-
-    // 4️⃣ Можно вернуть ссылку пользователю
-    await ctx.reply(
-      `📊 Анализ таблицы:\n${sheetUrl}\n\n${response.choices[0].message.content}`
-    );
-
-  } catch (err) {
-    console.error("TABLE COMMAND ERROR:", err);
-    await ctx.reply("❌ Ошибка обработки команды");
-  }*/
 });
 
 // --------------------------------------------------
@@ -512,8 +437,7 @@ async function handleToolCall(toolCall) {
   switch (toolName) {
     case "read_google_sheet": {
       const result = await readGoogleSheet({
-        spreadsheetId: args.spreadsheetId,
-        sheetName: args.sheetName
+        spreadsheetId: args.spreadsheetId
       });
 
       return {

@@ -364,6 +364,14 @@ bot.command("table", async (ctx) => {
     const userPrompt = match[2]?.trim() || "Проанализируй данные";
 */
      const text = ctx.message.text.replace('/table', '').trim();
+      // ✅ объявляем ВНЕ if
+    const urlMatch = text.match(
+       /^\/table\s+(https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9-_]+[^\s]*)\s*(.*)$/i
+    );
+
+    if (!urlMatch) {
+      return ctx.reply('❌ Не найдена ссылка на Google Sheets');
+    }
 
     // Извлекаем ссылку и оставшийся текст
    const sheetUrl = urlMatch[0]; // ✅ теперь определена

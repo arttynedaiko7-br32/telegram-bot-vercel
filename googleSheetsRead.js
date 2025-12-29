@@ -15,27 +15,22 @@ export async function readGoogleSheet({ spreadsheetId, sheetName }) {
     throw new Error("spreadsheetId is required");
   }
 
- // let targetSheetName = sheetName;
-let targetSheetName = null;
+  // 1️⃣ Всегда определяем лист ДИНАМИЧЕСКИ
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties.title"
+  });
 
-  // 1️⃣ Если имя листа не передано — получаем первый лист
+  const targetSheetName = meta?.data?.sheets?.[0]?.properties?.title;
+
   if (!targetSheetName) {
-    const meta = await sheets.spreadsheets.get({
-      spreadsheetId,                         // ✅ обязательно
-      fields: "sheets.properties.title"
-    });
-
-    targetSheetName = meta?.data?.sheets?.[0]?.properties?.title;
-
-    if (!targetSheetName) {
-      throw new Error("Не удалось определить лист таблицы");
-    }
+    throw new Error("Не удалось определить лист таблицы");
   }
 
-  // 2️⃣ Читаем значения листа (ТОЛЬКО values.get)
+  // 2️⃣ Читаем ВЕСЬ лист без ограничения диапазона
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,                           // ✅ обязательно
-    range: `${targetSheetName}!A1`                 // Sheet1 или Sheet1!A1:Z500
+    spreadsheetId,
+    range: targetSheetName // ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
   });
 
   return {

@@ -10,10 +10,6 @@ export const tools = [
           spreadsheetId: {
             type: "string",
             description: "ID Google Spreadsheet (часть URL между /d/ и /edit)"
-          },
-          sheetName: {
-            type: "string",
-            description: "Имя листа (необязательно)"
           }
         },
         required: ["spreadsheetId"]

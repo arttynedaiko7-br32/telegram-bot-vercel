@@ -31,9 +31,19 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 // Инициализация бота
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
+/*
+Session structure:
+{
+step: 'WAIT_SHEET_URL' | 'CHAT',
+spreadsheetId: string,
+sheetUrl: string,
+messages: [] // LLM context
+}
+*/
 
 // ---------- MEMORY ----------
 const memory = new Map();
+const tableSessions = new Map(); // Контекст работы с таблицей
 const MAX_HISTORY = 5; // Максимальное количество сообщений в истории
 const botMessages = new Map(); // Сохранение ID сообщений, отправленных ботом
 
@@ -185,6 +195,29 @@ bot.command("clear", async (ctx) => {
   conversationHistory = [];
   ctx.reply("История чата и сообщения удалены!");
 });
+
+// ===============================
+// /table — enter interactive mode
+// ===============================
+bot.command('table', async (ctx) => {
+tableSessions.set(ctx.chat.id, {
+step: 'WAIT_SHEET_URL',
+messages: []
+});
+
+await ctx.reply('📊 Пришлите ссылку на Google Sheets');
+});
+// ===============================
+// /table_exit — leave mode
+// ===============================
+bot.command('table_exit', async (ctx) => {
+tableSessions.delete(ctx.chat.id);
+await ctx.reply('🔚 Режим работы с таблицей завершён');
+});
+
+await ctx.reply('📊 Пришлите ссылку на Google Sheets');
+});
+
 // Функция для получения ответа от модели в контексте простого общения
 async function getAnswerFromModelText(ctx,question)
 {
@@ -327,10 +360,99 @@ async function askGroq(messages, tools) {
   }
 }
 
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text;
+
+  // команды здесь не обрабатываем
+  if (text.startsWith('/')) return;
+
+  const session = tableSessions.get(ctx.chat.id);
+
+  // ===========================
+  // TABLE MODE
+  // ===========================
+  if (session) {
+
+    // ---- STEP 1: waiting for sheet url ----
+    if (session.step === 'WAIT_SHEET_URL') {
+      const entities = ctx.message.entities || [];
+
+      const urlEntity = entities.find(e => e.type === 'url');
+      if (!urlEntity) {
+        return ctx.reply('❌ Пришлите ссылку на Google Sheets');
+      }
+
+      const sheetUrl = text.substring(
+        urlEntity.offset,
+        urlEntity.offset + urlEntity.length
+      );
+
+      const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (!idMatch) {
+        return ctx.reply('❌ Не удалось извлечь ID таблицы');
+      }
+
+      session.spreadsheetId = idMatch[1];
+      session.sheetUrl = sheetUrl;
+      session.step = 'CHAT';
+
+      session.messages.push({
+        role: 'system',
+        content: `Ты — аналитик данных.
+Ты работаешь с Google Sheets.
+Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
+Ты можешь задавать уточняющие вопросы.
+Ты должен учитывать предыдущие сообщения.
+Не придумывай данные.`
+      });
+
+      session.messages.push({
+        role: 'system',
+        content: `Spreadsheet URL: ${sheetUrl}`
+      });
+
+      return ctx.reply('✅ Таблица подключена. Задайте вопрос по данным.');
+    }
+
+    // ---- STEP 2: chat with table ----
+    if (session.step === 'CHAT') {
+      session.messages.push({
+        role: 'user',
+        content: text
+      });
+
+      try {
+        const response = await askGroq(session.messages, tools);
+        const message = response?.choices?.[0]?.message;
+
+        if (!message?.content) {
+          return ctx.reply('❌ Модель вернула пустой ответ');
+        }
+
+        session.messages.push({
+          role: 'assistant',
+          content: message.content
+        });
+
+        return ctx.reply(`📊 ${message.content}`);
+      } catch (err) {
+        console.error(err);
+        return ctx.reply('❌ Ошибка анализа таблицы');
+      }
+    }
+  }
+
+  // ===========================
+  // DEFAULT CHAT MODE
+  // ===========================
+  return ctx.reply('💬 Обычный чат. Используйте /table для анализа таблицы.');
+});
+
+
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
-bot.on("text", async (ctx) => {
+/*bot.on("text", async (ctx) => {
   
     //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
 
@@ -352,8 +474,8 @@ bot.on("text", async (ctx) => {
       break;
   }
   
-});
-
+});*/
+/*
 bot.command("table", async (ctx) => {
   try {
  
@@ -425,7 +547,7 @@ ctx.reply(`📊 Анализ таблицы:\n${content}`);
 ctx.reply('❌ Ошибка обработки команды:\n' + err.message);
 }
 
-});
+});*/
 
 // --------------------------------------------------
 // Функция callback tool

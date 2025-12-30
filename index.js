@@ -342,8 +342,8 @@ bot.on('text', async (ctx) => {
     case SessionMode.TEXT: {
       const userQuestion = ctx.message.text;  
       console.log('Мы попали в ветку text');
-      await getAnswerFromModelText(ctx,userQuestion);
-      break
+      return await getAnswerFromModelText(ctx,userQuestion);
+      
     }
 
     // =====================

@@ -199,13 +199,15 @@ bot.command("clear", async (ctx) => {
 // /table — enter interactive mode
 // ===============================
 bot.command('table', async (ctx) => {
-tableSessions.set(ctx.chat.id, {
-step: 'WAIT_SHEET_URL',
-messages: []
+  tableSessions.set(ctx.chat.id, {
+    isTableMode: true,         
+    step: 'WAIT_SHEET_URL',
+    messages: []
+  });
+
+  await ctx.reply('📊 Пришлите ссылку на Google Sheets');
 });
 
-await ctx.reply('📊 Пришлите ссылку на Google Sheets');
-});
 
 // ===============================
 // /table_exit — leave mode
@@ -303,13 +305,16 @@ async function getAnswerFromModelPDF(question) {
 
 
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text;
+  //const text = ctx.message.text;
 
   // команды здесь не обрабатываем
-  if (text.startsWith('/')) return;
+  if (ctx.message.text.startsWith('/')) return;
 
   const session = tableSessions.get(ctx.chat.id);
-  tableSession(session,ctx,groq);
+  
+  if (session?.isTableMode) {
+    return tableSession(session, ctx, groq);
+  }
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================

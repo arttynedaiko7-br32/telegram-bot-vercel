@@ -8,6 +8,8 @@ import { handleToolCall } from "./handleToolCall.js";
 // --------------------------------------------------
 export async function tableSession(session,ctx,groq)
 {
+ const text = ctx.message.text;
+
   if (session) {
 
     // ---- STEP 1: waiting for sheet url ----

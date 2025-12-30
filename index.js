@@ -298,6 +298,30 @@ async function getAnswerFromModelPDF(question) {
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
 bot.on('text', async (ctx) => {
+
+  if (ctx.message.text.startsWith('/')) return;
+
+  // 1️⃣ PDF имеет приоритет
+  if (orderStatus === StatusContext.PDF) {
+    if (!pdfText.trim()) {
+      return ctx.reply('Не удалось извлечь текст из PDF');
+    }
+    console.log('Мы попали в ветку pdf');
+    const question = ctx.message.text;
+      const answer = await getAnswerFromModelPDF(question);
+      ctx.reply(answer)
+  }
+
+  const session = tableSessions.get(ctx.chat.id);
+
+  // 2️⃣ Потом таблица
+  if (session?.isTableMode) {
+    return tableSession(session, ctx, groq);
+  }
+
+  // 3️⃣ Обычный текст
+  console.log('Мы попали в ветку text');
+  await getAnswerFromModelText(ctx, ctx.message.text);
   //const text = ctx.message.text;
 
   // команды здесь не обрабатываем
@@ -311,6 +335,7 @@ bot.on('text', async (ctx) => {
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================
+  /*
    switch (orderStatus) {
     case StatusContext.TEXT:
       const userQuestion = ctx.message.text;  
@@ -329,7 +354,7 @@ bot.on('text', async (ctx) => {
     break
     default:
       break;
-  }
+  }*/
 });
 
 // --------------------------------------------------

@@ -359,9 +359,10 @@ bot.on('text', async (ctx) => {
       return ctx.reply(answer);
     }
 
-    case SessionMode.TABLE_BEGIN: {
-       return tableSession(session, ctx, groq);
-  }
+  case SessionMode.TABLE_BEGIN:
+  case SessionMode.TABLE_CHAT:{
+  return tableSession(session, ctx, groq);
+}
 
       default:
       session.mode = SessionMode.TEXT;

@@ -57,26 +57,26 @@ export async function tableSession(session,ctx,groq)
         Если информации недостаточно — задай уточняющий вопрос.`
       });
 
-      const isTableUrlSystem = (m) =>
-      m.role === 'system' && m.content.startsWith('Spreadsheet URL:');
-
       session.messages.push({
         role: 'system',
         content: `Spreadsheet URL: ${sheetUrl}`
       });
 
-      return ctx.reply('✅ Таблица подключена. Задайте вопрос по данным.');
-    }
-    
+      const isTableUrlSystem = (m) =>
+      m.role === 'system' && m.content.startsWith('Spreadsheet URL:');
+
       if (session.messages.length > 4) {
       const indexToRemove = session.messages.findIndex(
       m => !isTableUrlSystem(m)
-  );
+     );
 
   if (indexToRemove !== -1) {
     session.messages.splice(indexToRemove, 1);
   }
 }
+
+      return ctx.reply('✅ Таблица подключена. Задайте вопрос по данным.');
+    }
 
     // ---- STEP 2: chat with table ----
     if (session.mode === SessionMode.TABLE_CHAT) {

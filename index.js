@@ -11,6 +11,14 @@ const StatusContext = Object.freeze({
 });
 let orderStatus = StatusContext.TEXT;
 
+const SessionMode = {
+  TEXT: 'TEXT',
+  PDF: 'PDF',
+  TABLE_WAIT_URL: 'TABLE_WAIT_URL',
+  TABLE_CHAT: 'TABLE_CHAT',
+};
+
+
 // ---------- ENV ----------
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -37,6 +45,22 @@ const tableSessions = new Map(); // Контекст для работы с та
 const MAX_HISTORY = 5; // Максимальное количество сообщений в истории
 const botMessages = new Map(); // Сохранение ID сообщений, отправленных ботом
 
+const sessions = new Map();
+
+function getSession(chatId) {
+  if (!sessions.has(chatId)) {
+    sessions.set(chatId, {
+      mode: SessionMode.TEXT,
+      pdfText: '',
+      spreadsheetId: null,
+      sheetUrl: null,
+      messages: [],
+    });
+  }
+  return sessions.get(chatId);
+}
+
+
 // ---------- CONTEXT PDF ----------
 let pdfText = "";
 let conversationHistory = [];
@@ -50,6 +74,7 @@ const SYSTEM_PROMPT =
 
 // ОБРАБОТКА ПОЛУЧЕНИЯ ДОКУМЕНТА
 bot.on('document', async (ctx) => {
+   const session = getSession(ctx.chat.id);
   const fileId = ctx.message.document.file_id;
   try {
     const fileLink = await ctx.telegram.getFileLink(fileId);
@@ -61,7 +86,8 @@ bot.on('document', async (ctx) => {
     const text = await extractTextFromPDF(buffer);
     if (text) {
       pdfText = text;
-      orderStatus = StatusContext.PDF
+      //orderStatus = StatusContext.PDF
+      session.mode = SessionMode.PDF;
       ctx.reply('Файл успешно обработан! Задавайте ваши вопросы.');
     } else {
       ctx.reply('Не удалось извлечь текст из файла. Попробуйте снова.');
@@ -190,22 +216,26 @@ bot.command("clear", async (ctx) => {
 // /table — enter interactive mode
 // ===============================
 bot.command('table', async (ctx) => {
-  tableSessions.set(ctx.chat.id, {
-    isTableMode: true,         
-    step: 'WAIT_SHEET_URL',
-    messages: []
-  });
+  const session = getSession(ctx.chat.id);
+
+  session.mode = SessionMode.TABLE_WAIT_URL;
+  session.messages = [];
 
   await ctx.reply('📊 Пришлите ссылку на Google Sheets');
 });
-
 
 // ===============================
 // /table_exit — leave mode
 // ===============================
 bot.command('table_exit', async (ctx) => {
-tableSessions.delete(ctx.chat.id);
-await ctx.reply('🔚 Режим работы с таблицей завершён');
+  const session = getSession(ctx.chat.id);
+
+  session.mode = SessionMode.TEXT;
+  session.spreadsheetId = null;
+  session.sheetUrl = null;
+  session.messages = [];
+
+  await ctx.reply('🔚 Режим таблицы завершён');
 });
 
 
@@ -299,8 +329,44 @@ async function getAnswerFromModelPDF(question) {
 // --------------------------------------------------
 bot.on('text', async (ctx) => {
 
-  //const text = ctx.message.text;
+  const session = getSession(ctx.chat.id);
+  const text = ctx.message.text;
 
+  if (text.startsWith('/')) return;
+
+  switch (session.mode) {
+ // =====================
+    // TEXT
+    // =====================
+    case SessionMode.TEXT: {
+      const userQuestion = ctx.message.text;  
+      console.log('Мы попали в ветку text');
+      await getAnswerFromModelText(ctx,userQuestion);
+      break
+    }
+
+    // =====================
+    // PDF
+    // =====================
+    case SessionMode.PDF: {
+      if (!pdfText) {
+        return ctx.reply('PDF ещё не загружен');
+      }
+
+      const question = ctx.message.text;
+      const answer = await getAnswerFromModelPDF(question);
+
+      return ctx.reply(answer);
+    }
+      default:
+      session.mode = SessionMode.TEXT;
+      return ctx.reply('💬 Режим сброшен. Обычный чат.');
+
+  }
+
+
+  //const text = ctx.message.text;
+/*
   // команды здесь не обрабатываем
   if (ctx.message.text.startsWith('/')) return;
 
@@ -308,7 +374,7 @@ bot.on('text', async (ctx) => {
   
   if (session?.isTableMode) {
     return tableSession(session, ctx, groq);
-  } else {
+  } 
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================
@@ -331,7 +397,7 @@ bot.on('text', async (ctx) => {
     break
     default:
       break;
-  } }//else
+  } */
 });
 
 // --------------------------------------------------

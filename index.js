@@ -301,13 +301,13 @@ bot.on('text', async (ctx) => {
   //const text = ctx.message.text;
 
   // команды здесь не обрабатываем
-  if (ctx.message.text.startsWith('/')) return;
+ // if (ctx.message.text.startsWith('/')) return;
 
-  const session = tableSessions.get(ctx.chat.id);
+ // const session = tableSessions.get(ctx.chat.id);
   
-  if (session?.isTableMode) {
-    return tableSession(session, ctx, groq);
-  }
+ // if (session?.isTableMode) {
+ //   return tableSession(session, ctx, groq);
+ // }
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================

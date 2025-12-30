@@ -283,7 +283,7 @@ async function getAnswerFromModelPDF(question) {
 
     // Передаем контекст и релевантный текст в модель
     const response =await groq.chat.completions.create({
-      model: "llama-3.1-70b-instruct",
+      model: "llama-3.3-70b-versatile",
      messages: [
           { role: 'system', content: 'Ты ассистент, который помогает отвечать на вопросы по содержимому PDF.' },
           { role: 'user', content: question },
@@ -302,8 +302,9 @@ async function getAnswerFromModelPDF(question) {
     return 'Извините, произошла ошибка при обработке вашего запроса.';
   }
 }
-
-
+// --------------------------------------------------
+// ОБРАБОТКА ТЕКСТА (вопросы к модели)
+// --------------------------------------------------
 bot.on('text', async (ctx) => {
   //const text = ctx.message.text;
 
@@ -337,33 +338,6 @@ bot.on('text', async (ctx) => {
   }
   return ctx.reply('💬 Обычный чат. Используйте /table для анализа таблицы.');
 });
-
-// --------------------------------------------------
-// ОБРАБОТКА ТЕКСТА (вопросы к модели)
-// --------------------------------------------------
-/*bot.on("text", async (ctx) => {
-  
-    //orderStatus = (pdfText.trim() === "") ? StatusContext.TEXT : StatusContext.PDF;
-
-  switch (orderStatus) {
-    case StatusContext.TEXT:
-      const userQuestion = ctx.message.text;  
-      await getAnswerFromModelText(ctx,userQuestion);
-      break;
-    case StatusContext.PDF:
-      if (!pdfText.trim()) {
-           console.log('Ошибка: нет текста из PDF');
-           return 'Не удалось извлечь текст из PDF. Попробуйте другой файл.';
-         }
-      const question = ctx.message.text;
-      const answer = await getAnswerFromModelPDF(question);
-      ctx.reply(answer);
-    break
-    default:
-      break;
-  }
-  
-});*/
 
 // --------------------------------------------------
 // ВЕРСЕЛЬ WEBHOOK (обработка webhook в коде)

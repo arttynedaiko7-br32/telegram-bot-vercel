@@ -43,7 +43,7 @@ messages: [] // LLM context
 
 // ---------- MEMORY ----------
 const memory = new Map();
-const tableSessions = new Map(); // Контекст работы с таблицей
+const tableSessions = new Map(); // Контекст для работы с таблицей
 const MAX_HISTORY = 5; // Максимальное количество сообщений в истории
 const botMessages = new Map(); // Сохранение ID сообщений, отправленных ботом
 
@@ -282,7 +282,7 @@ async function getAnswerFromModelPDF(question) {
 
     // Передаем контекст и релевантный текст в модель
     const response =await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.1-70b-instruct",
      messages: [
           { role: 'system', content: 'Ты ассистент, который помогает отвечать на вопросы по содержимому PDF.' },
           { role: 'user', content: question },
@@ -297,7 +297,7 @@ async function getAnswerFromModelPDF(question) {
     conversationHistory.push({ role: 'assistant', content: answer });
     return answer;
   } catch (error) {
-    console.error('Ошибка при запросе к llama-3.3-70b-versatile:', error);
+    console.error('Ошибка при запросе к llama-3.1-70b-instruct:', error);
     return 'Извините, произошла ошибка при обработке вашего запроса.';
   }
 }

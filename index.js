@@ -4,7 +4,7 @@ import Groq from "groq-sdk";
 import axios from 'axios'; 
 import pdfParse from 'pdf-parse';  
 import { readGoogleSheet } from "./googleSheetsRead.js";
-import { tableSession } from "./tableSessions.js";
+import { tableSession } from "./tableSession.js";
 
 const StatusContext = Object.freeze({
   TEXT: 0,

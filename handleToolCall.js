@@ -1,6 +1,8 @@
 // --------------------------------------------------
 // Функция callback tool
 // --------------------------------------------------
+import { readGoogleSheet } from "./googleSheetsRead.js";
+
 export async function handleToolCall(toolCall) {
   const toolName = toolCall.function.name;
   const args = JSON.parse(toolCall.function.arguments || "{}");

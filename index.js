@@ -360,10 +360,8 @@ bot.on('text', async (ctx) => {
     }
 
     case SessionMode.TABLE_BEGIN: {
-         tableSession(session, ctx, groq);
-
+       return tableSession(session, ctx, groq);
   }
-
 
       default:
       session.mode = SessionMode.TEXT;

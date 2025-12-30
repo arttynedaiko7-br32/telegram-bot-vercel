@@ -60,6 +60,14 @@ export async function tableSession(session,ctx,groq)
       const isTableUrlSystem = (m) =>
       m.role === 'system' && m.content.startsWith('Spreadsheet URL:');
 
+      session.messages.push({
+        role: 'system',
+        content: `Spreadsheet URL: ${sheetUrl}`
+      });
+
+      return ctx.reply('✅ Таблица подключена. Задайте вопрос по данным.');
+    }
+    
       if (session.messages.length > 4) {
       const indexToRemove = session.messages.findIndex(
       m => !isTableUrlSystem(m)
@@ -69,14 +77,6 @@ export async function tableSession(session,ctx,groq)
     session.messages.splice(indexToRemove, 1);
   }
 }
-
-      session.messages.push({
-        role: 'system',
-        content: `Spreadsheet URL: ${sheetUrl}`
-      });
-
-      return ctx.reply('✅ Таблица подключена. Задайте вопрос по данным.');
-    }
 
     // ---- STEP 2: chat with table ----
     if (session.mode === SessionMode.TABLE_CHAT) {

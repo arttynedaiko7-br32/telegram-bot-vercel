@@ -3,8 +3,8 @@ import { Telegraf } from "telegraf";
 import Groq from "groq-sdk";
 import axios from 'axios'; 
 import pdfParse from 'pdf-parse';  
-import { tools } from "./tools.js";
 import { readGoogleSheet } from "./googleSheetsRead.js";
+import { tableSession } from "./tableSessions.js";
 
 const StatusContext = Object.freeze({
   TEXT: 0,
@@ -301,63 +301,7 @@ async function getAnswerFromModelPDF(question) {
     return 'Извините, произошла ошибка при обработке вашего запроса.';
   }
 }
-// --------------------------------------------------
-// ЗАПРОС К ГУГЛ ТАБЛИЦЕ
-// --------------------------------------------------
-async function askGroq(messages, tools) {
-  try {
-    let response = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      messages,
-      tools,
-      tool_choice: 'auto',
-      temperature: 0.0,
-      max_tokens: 1024
-    });
 
-    console.log(
-  'MODEL MESSAGE:',
-  JSON.stringify(response.choices[0].message, null, 2)
-);
-
-
-    const message = response.choices[0].message;
-    const toolCall = message.tool_calls?.[0];
-
-
-    // 🔥 ВАЖНО: tool_calls (массив), а не tool_call
-    if (message.tool_calls && message.tool_calls.length > 0) {
-
-      for (const toolCall of message.tool_calls) {
-        const toolResult = await handleToolCall(toolCall);
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id, // 🔥 ОБЯЗАТЕЛЬНО
-          content: JSON.stringify(toolResult.result, null, 2)
-        });
-      }
-
-      // 2️⃣ Второй вызов модели БЕЗ tools
-      response = await groq.chat.completions.create({
-        model: 'llama-3.1-8b-instant',
-        messages,
-        temperature: 0.0,
-        max_tokens: 1024
-      });
-    }
-
-    if (!response?.choices) {
-  throw new Error("LLM response has no choices");
-}
-
-    return response;
-
-  } catch (err) {
-    console.error('askGroq error:', err);
-    return { error: { message: err.message, status: err.status || 500 } };
-  }
-}
 
 bot.on('text', async (ctx) => {
   const text = ctx.message.text;
@@ -366,111 +310,7 @@ bot.on('text', async (ctx) => {
   if (text.startsWith('/')) return;
 
   const session = tableSessions.get(ctx.chat.id);
-
-  // ===========================
-  // TABLE MODE
-  // ===========================
-  if (session) {
-
-    // ---- STEP 1: waiting for sheet url ----
-    if (session.step === 'WAIT_SHEET_URL') {
-      const entities = ctx.message.entities || [];
-
-      const urlEntity = entities.find(e => e.type === 'url');
-      if (!urlEntity) {
-        return ctx.reply('❌ Пришлите ссылку на Google Sheets');
-      }
-
-      const sheetUrl = text.substring(
-        urlEntity.offset,
-        urlEntity.offset + urlEntity.length
-      );
-
-      const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      if (!idMatch) {
-        return ctx.reply('❌ Не удалось извлечь ID таблицы');
-      }
-
-      session.spreadsheetId = idMatch[1];
-      session.sheetUrl = sheetUrl;
-      session.step = 'CHAT';
-
-      session.messages.push({
-        role: 'system',
-        content: `Ты — аналитический ассистент для работы с данными Google Sheets.
-
-                  У тебя есть доступ ТОЛЬКО к ОДНОЙ Google таблице.
-                  URL этой таблицы уже передан тебе отдельно и всегда считается актуальным.
-
-        СТРОГИЕ ПРАВИЛА:
-        1. Если для ответа требуются данные из таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
-        2. Ты НЕ имеешь права:
-         - придумывать данные,
-         - делать предположения о значениях,
-         - использовать внешние источники,
-         - запрашивать или придумывать другие таблицы или spreadsheetId.
-        3. Если данных в таблице недостаточно или они отсутствуют — прямо сообщи об этом пользователю.
-        4. Если запрос пользователя не требует данных таблицы — отвечай без использования инструментов.
-        5. Ты обязан учитывать контекст предыдущих сообщений в текущем диалоге.
-        6. Ты можешь задавать уточняющие вопросы, если без них невозможно корректно ответить.
-
-        ВАЖНО:
-      - Используй данные ТОЛЬКО из этой таблицы.
-      - Любые расчёты, выводы и формулировки должны опираться на реальные данные из таблицы.
-      - Если ты не уверен — НЕ ОТВЕЧАЙ, а уточни.`
-      });
-
-      const isTableUrlSystem = (m) =>
-      m.role === 'system' && m.content.startsWith('Spreadsheet URL:');
-
-      if (session.messages.length > 4) {
-      const indexToRemove = session.messages.findIndex(
-      m => !isTableUrlSystem(m)
-  );
-
-  if (indexToRemove !== -1) {
-    session.messages.splice(indexToRemove, 1);
-  }
-}
-
-      session.messages.push({
-        role: 'system',
-        content: `Spreadsheet URL: ${sheetUrl}`
-      });
-
-      return ctx.reply('✅ Таблица подключена. Задайте вопрос по данным.');
-    }
-
-    // ---- STEP 2: chat with table ----
-    if (session.step === 'CHAT') {
-      session.messages.push({
-        role: 'user',
-        content: text
-      });
-
-      try {
-        const response = await askGroq(session.messages, tools);
-        const message = response?.choices?.[0]?.message;
-
-        if (!message?.content) {
-          return ctx.reply('❌ Модель вернула пустой ответ');
-        }
-if (session.messages.length > 4) {
-  session.messages = session.messages.slice(-12);
-}
-        session.messages.push({
-          role: 'assistant',
-          content: message.content
-        });
-
-        return ctx.reply(`📊 ${message.content}`);
-      } catch (err) {
-        console.error(err);
-        return ctx.reply('❌ Ошибка анализа таблицы');
-      }
-    }
-  }
-
+  tableSession(session,ctx,groq);
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================
@@ -520,31 +360,6 @@ if (session.messages.length > 4) {
   }
   
 });*/
-
-
-// --------------------------------------------------
-// Функция callback tool
-// --------------------------------------------------
-async function handleToolCall(toolCall) {
-  const toolName = toolCall.function.name;
-  const args = JSON.parse(toolCall.function.arguments || "{}");
-
-  switch (toolName) {
-    case "read_google_sheet": {
-      const result = await readGoogleSheet({
-        spreadsheetId: args.spreadsheetId
-      });
-
-      return {
-        tool_name: toolName,
-        result
-      };
-    }
-
-    default:
-      throw new Error(`Unknown tool: ${toolName}`);
-  }
-}
 
 // --------------------------------------------------
 // ВЕРСЕЛЬ WEBHOOK (обработка webhook в коде)

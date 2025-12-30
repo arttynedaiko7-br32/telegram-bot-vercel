@@ -335,6 +335,12 @@ bot.on('text', async (ctx) => {
 
   if (text.startsWith('/')) return next();
 
+  console.log(
+  'MODE VALUE:', session.mode,
+  '=== TABLE_BEGIN ?', session.mode === SessionMode.TABLE_BEGIN,
+  'SessionMode obj:', SessionMode
+);
+
   switch (session.mode) {
  // =====================
     // TEXT

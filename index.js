@@ -328,7 +328,7 @@ async function getAnswerFromModelPDF(question) {
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
-bot.on('text', async (ctx) => {
+bot.on('text', async (ctx, next) => {
 
   const session = getSession(ctx.chat.id);
   const text = ctx.message.text;

@@ -459,9 +459,25 @@ if (session.messages.length > 4) {
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================
+    switch (orderStatus) {
+    case StatusContext.TEXT:
+      const userQuestion = ctx.message.text;  
+      await getAnswerFromModelText(ctx,userQuestion);
+      break;
+    case StatusContext.PDF:
+      if (!pdfText.trim()) {
+           console.log('Ошибка: нет текста из PDF');
+           return 'Не удалось извлечь текст из PDF. Попробуйте другой файл.';
+         }
+      const question = ctx.message.text;
+      const answer = await getAnswerFromModelPDF(question);
+      ctx.reply(answer);
+    break
+    default:
+      break;
+  }
   return ctx.reply('💬 Обычный чат. Используйте /table для анализа таблицы.');
 });
-
 
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
@@ -489,79 +505,7 @@ if (session.messages.length > 4) {
   }
   
 });*/
-/*
-bot.command("table", async (ctx) => {
-  try {
- 
-    const text = ctx.message.text;
-    const entities = ctx.message.entities || [];
 
-    //Ищем URL, который Telegram уже распарсил
-    const urlEntity = entities.find(e => e.type === 'url');
-
-    if (!urlEntity) {
-      return ctx.reply(
-        '❌ Формат команды:\n/table <ссылка на Google Sheets> <что нужно сделать>'
-      );
-    }
-
-    //Достаём ПОЛНЫЙ URL
-    const sheetUrl = text.substring(
-      urlEntity.offset,
-      urlEntity.offset + urlEntity.length
-    );
-
-    //Извлекаем spreadsheetId
-    const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-    if (!idMatch) {
-      return ctx.reply('❌ Не удалось извлечь ID таблицы');
-    }
-
-    const spreadsheetId = idMatch[1];
-
-    //Достаём пользовательский промт (всё, кроме /table и ссылки)
-    const userPrompt =
-      text
-        .replace('/table', '')
-        .replace(sheetUrl, '')
-        .trim() || 'Проанализируй данные';
-    
-const messages = [
-      {
-        role: 'system',
-        content: `Ты — аналитик данных.
-        Если для ответа нужны данные таблицы — ОБЯЗАТЕЛЬНО используй инструмент read_google_sheet.
-        Не придумывай данные.`
-      },
-      {
-        role: 'user',
-        content: `User request: ${userPrompt}\nSpreadsheet URL: ${sheetUrl}`
-      }
-    ];
-  const response = await askGroq(messages,tools);
-const content = response?.choices?.[0]?.message?.content;
-
-if (!content) {
-  throw new Error("Модель вернула пустой ответ");
-}
-
-
-if (response?.error) {
-  throw new Error(response.error.message);
-}
-
-if (!content) return ctx.reply('⏳ Ошибка: пустой результат');
-
-
-ctx.reply(`📊 Анализ таблицы:\n${content}`);
-
-
-} catch (err) {
-//console.error('TABLE COMMAND ERROR:', err);
-ctx.reply('❌ Ошибка обработки команды:\n' + err.message);
-}
-
-});*/
 
 // --------------------------------------------------
 // Функция callback tool

@@ -30,15 +30,6 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 // Инициализация бота
 const bot = new Telegraf(TELEGRAM_TOKEN);
 
-/*
-Session structure:
-{
-step: 'WAIT_SHEET_URL' | 'CHAT',
-spreadsheetId: string,
-sheetUrl: string,
-messages: [] // LLM context
-}
-*/
 
 // ---------- MEMORY ----------
 const memory = new Map();
@@ -290,7 +281,7 @@ async function getAnswerFromModelPDF(question) {
           { role: 'assistant', content: relevantText },  // Передаем только релевантный текст
           ...conversationHistory,  // История сообщений
       ],
-      temperature: 0.3,
+      temperature: 0.1,
       max_tokens: 1000,
     });
     // Добавляем ответ в историю для сохранения контекста
@@ -302,6 +293,7 @@ async function getAnswerFromModelPDF(question) {
     return 'Извините, произошла ошибка при обработке вашего запроса.';
   }
 }
+
 // --------------------------------------------------
 // ОБРАБОТКА ТЕКСТА (вопросы к модели)
 // --------------------------------------------------
@@ -319,9 +311,10 @@ bot.on('text', async (ctx) => {
   // ===========================
   // DEFAULT CHAT MODE
   // ===========================
-    switch (orderStatus) {
+   switch (orderStatus) {
     case StatusContext.TEXT:
       const userQuestion = ctx.message.text;  
+      console.log('Мы попали в ветку text');
       await getAnswerFromModelText(ctx,userQuestion);
       break;
     case StatusContext.PDF:
@@ -329,6 +322,7 @@ bot.on('text', async (ctx) => {
            console.log('Ошибка: нет текста из PDF');
            return 'Не удалось извлечь текст из PDF. Попробуйте другой файл.';
          }
+          console.log('Мы попали в ветку pdf');
       const question = ctx.message.text;
       const answer = await getAnswerFromModelPDF(question);
       ctx.reply(answer);
@@ -336,7 +330,6 @@ bot.on('text', async (ctx) => {
     default:
       break;
   }
-  return ctx.reply('💬 Обычный чат. Используйте /table для анализа таблицы.');
 });
 
 // --------------------------------------------------

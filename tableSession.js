@@ -1,7 +1,15 @@
 import { tools } from "./tools.js";
 import { handleToolCall } from "./handleToolCall.js";
-
-
+import { SessionMode } from "./index.js"
+/*
+Session structure:
+{
+step: 'WAIT_SHEET_URL' | 'CHAT',
+spreadsheetId: string,
+sheetUrl: string,
+messages: [] // LLM context
+}
+*/
 
 // --------------------------------------------------
 // TABLE SESSION (обработка STATE SESSION)
@@ -13,7 +21,7 @@ export async function tableSession(session,ctx,groq)
   if (session) {
 
     // ---- STEP 1: waiting for sheet url ----
-    if (session.step === 'WAIT_SHEET_URL') {
+    if (session.mode === SessionMode.TABLE_BEGIN) {
       const entities = ctx.message.entities || [];
 
       const urlEntity = entities.find(e => e.type === 'url');
@@ -33,7 +41,7 @@ export async function tableSession(session,ctx,groq)
 
       session.spreadsheetId = idMatch[1];
       session.sheetUrl = sheetUrl;
-      session.step = 'CHAT';
+      session.mode = SessionMode.TABLE_CHAT;
 
       session.messages.push({
         role: 'system',
@@ -71,7 +79,7 @@ export async function tableSession(session,ctx,groq)
     }
 
     // ---- STEP 2: chat with table ----
-    if (session.step === 'CHAT') {
+    if (session.mode === SessionMode.TABLE_CHAT) {
       session.messages.push({
         role: 'user',
         content: text

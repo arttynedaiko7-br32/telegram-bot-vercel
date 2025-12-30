@@ -11,11 +11,11 @@ const StatusContext = Object.freeze({
 });
 let orderStatus = StatusContext.TEXT;
 
-const SessionMode = {
+export const SessionMode = {
   TEXT: 'TEXT',
   PDF: 'PDF',
-  TABLE_WAIT_URL: 'TABLE_WAIT_URL',
-  TABLE_CHAT: 'TABLE_CHAT',
+  TABLE_BEGIN: 'TABLE_WAIT_URL',
+  TABLE_CHAT: 'CHAT',
 };
 
 
@@ -218,7 +218,7 @@ bot.command("clear", async (ctx) => {
 bot.command('table', async (ctx) => {
   const session = getSession(ctx.chat.id);
 
-  session.mode = SessionMode.TABLE_WAIT_URL;
+  session.mode = SessionMode.TABLE_BEGIN;
   session.messages = [];
 
   await ctx.reply('📊 Пришлите ссылку на Google Sheets');
@@ -358,6 +358,13 @@ bot.on('text', async (ctx) => {
 
       return ctx.reply(answer);
     }
+
+    case SessionMode.TABLE_BEGIN: {
+         tableSession(session, ctx, groq);
+
+  }
+
+
       default:
       session.mode = SessionMode.TEXT;
       return ctx.reply('💬 Режим сброшен. Обычный чат.');

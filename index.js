@@ -170,8 +170,6 @@ bot.command("help", (ctx) => {
       "/clear — очистить историю чата\n"
   );
 });
-/////
-
 
 // --------------------------------------------------
 // СБРОС ПАМЯТИ
@@ -182,7 +180,12 @@ bot.command("reset", (ctx) => {
   pdfText = "";  // Очищаем текст PDF
   conversationHistory = [];  // Очищаем историю сообщений
   ctx.reply("Контекст был сброшен!");
-  orderStatus = StatusContext.TEXT
+  //orderStatus = StatusContext.TEXT
+  const session = getSession(ctx.chat.id);
+  session.mode = SessionMode.TEXT;
+  session.spreadsheetId = null;
+  session.sheetUrl = null;
+  session.messages = [];
 });
 
 bot.command("clear", async (ctx) => {
@@ -217,10 +220,8 @@ bot.command("clear", async (ctx) => {
 // ===============================
 bot.command('table', async (ctx) => {
   const session = getSession(ctx.chat.id);
-
   session.mode = SessionMode.TABLE_BEGIN;
   session.messages = [];
-
   await ctx.reply('📊 Пришлите ссылку на Google Sheets');
 });
 
@@ -332,7 +333,7 @@ bot.on('text', async (ctx) => {
   const session = getSession(ctx.chat.id);
   const text = ctx.message.text;
 
-  if (text.startsWith('/')) return;
+  if (text.startsWith('/')) return next();
 
   switch (session.mode) {
  // =====================
